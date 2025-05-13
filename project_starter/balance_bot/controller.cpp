@@ -20,6 +20,9 @@ using namespace SaiPrimitives;
 bool runloop = false;
 void sighandler(int){runloop = false;}
 
+const double m = 0.17;
+const double g = 9.81;
+
 #include "redis_keys.h"
 
 // States 
@@ -27,6 +30,41 @@ enum State {
 	IDLE = 0,
 	BALANCE
 };
+
+
+// Cross-product matrix operator
+Matrix3d crossProductOperator(const Vector3d& v) {
+	Matrix3d cross;
+	cross <<     0, -v.z(),  v.y(),
+			v.z(),     0, -v.x(),
+			-v.y(),  v.x(),     0;
+	return cross;
+}
+
+// Computes position vector from moment vector
+Vector3d momentsToPositions(const Vector3d& n, const Vector3d& M) {
+	Vector3d norm_n = n.normalized(); // Normalize normal vector
+	Vector3d e_z(0, 0, 1);
+
+	Matrix3d proj = norm_n * norm_n.transpose(); // Outer product (projection matrix)
+	Vector3d F = proj * (-1.0 * m * g * e_z);
+	Vector3d Q_vec = -F;
+	Matrix3d Q = crossProductOperator(Q_vec);
+
+	// Compute pseudoinverse using SVD
+	JacobiSVD<Matrix3d> svd(Q, ComputeFullU | ComputeFullV);
+	Vector3d S = svd.singularValues();
+	Matrix3d S_inv = Matrix3d::Zero();
+	for (int i = 0; i < 3; ++i) {
+		if (S(i) > 1e-6) {
+			S_inv(i,i) = 1.0 / S(i);
+		}
+	}
+	Matrix3d Q_pinv = svd.matrixV() * S_inv * svd.matrixU().transpose();
+
+	Vector3d r = Q_pinv * M;
+	return r;
+}
 
 int main() {
 	// Location of URDF files specifying world and robot information
@@ -68,7 +106,6 @@ int main() {
 	Vector3d ee_pos;
 	Matrix3d ee_ori;
 
-
 	// joint task
 	auto joint_task = std::make_shared<SaiPrimitives::JointTask>(robot);
 	joint_task->setGains(400, 40, 0);
@@ -78,15 +115,19 @@ int main() {
 	q_desired *= M_PI / 180.0;
 	joint_task->setGoalPosition(q_desired);
 
-
 	VectorXd ee_pos_desired(3); 
 
-
+	Vector3d ball_position_prev = Vector3d::Zero();
+	Vector3d ball_velocity = Vector3d::Zero();
 
 	// create a loop timer
 	runloop = true;
 	double control_freq = 1000;
 	SaiCommon::LoopTimer timer(control_freq, 1e6);
+
+	double previousTime;
+	previousTime = 0.0;
+	double timeStep = 0.3;
 
 	while (runloop) {
 		timer.waitForNextLoop();
@@ -96,6 +137,53 @@ int main() {
 		robot->setQ(redis_client.getEigen(JOINT_ANGLES_KEY));
 		robot->setDq(redis_client.getEigen(JOINT_VELOCITIES_KEY));
 		robot->updateModel();
+
+		Vector3d ee_pos = robot->position(control_link, control_point);
+		Matrix3d ee_ori = robot->rotation(control_link);
+
+		Vector3d moment = redis_client.getEigen(MOMENT_SENSOR_KEY);
+		Vector3d zP = ee_ori.col(2); // Z-axis of the frame of the plate
+
+		// Compute the position vector from the moment vector
+		Vector3d M = -moment; // Moment vector
+		Vector3d r = momentsToPositions(zP, M);
+		Vector3d offset(0.4, 0.0, 0.65-0.01514);			
+		Vector3d ball_position_predicted = r + offset;
+
+		Vector3d ball_position = redis_client.getEigen(BALL_POS_KEY);
+
+		// cout << ball_position_predicted.transpose() << endl;
+		// cout << ball_position.transpose() << endl;
+
+		// // Numerical differentiation to compute ball velocity
+		// if (!first_iteration) {
+		// 	ball_velocity = (ball_position_predicted - ball_position_prev) * control_freq;
+		// } else {
+		// 	first_iteration = false;
+		// }
+		// ball_position_prev = ball_position_predicted;
+
+		Vector3d ball_velocity_real = redis_client.getEigen(BALL_VEL_KEY);
+
+
+		double elapsedTime = time - previousTime;
+		if (elapsedTime > timeStep) {
+			ball_velocity = (ball_position_predicted - ball_position_prev) / elapsedTime;
+			previousTime = time;
+			ball_position_prev = ball_position_predicted;
+		}
+
+
+		Vector3d force = redis_client.getEigen(FORCE_SENSOR_KEY);
+		float Fz = force(2);
+		float Fz_thr1 = 1.0;
+		float Fz_thr2 = 10.0;
+
+		float kp = 150.0;
+		float kv = 0.0;
+
+		VectorXd inputForces(3);
+
 	
 		if (state == IDLE) {
 			// update task model 
@@ -105,48 +193,79 @@ int main() {
 			command_torques = joint_task->computeTorques();
 
 
-			Vector3d force = redis_client.getEigen(FORCE_SENSOR_KEY);
-			// cout << "force local frame:\t" << force.transpose() << endl;
 
-			float Fz = force(2);
 
-			float Fz_thr = 0.1;
 
-			Vector3d moment = redis_client.getEigen(MOMENT_SENSOR_KEY);
-			cout << "moment local frame:\t" << moment.transpose() << endl;
-
-			if (abs(Fz) > Fz_thr) {
+			if (Fz > Fz_thr1 && Fz < Fz_thr2) {
 				cout << "Idle to Balance" << endl;
 
 				pose_task->reInitializeTask();
 				joint_task->reInitializeTask();
 
-				ee_pos = robot->position(control_link, control_point);
-				ee_ori = robot->rotation(control_link);
+				pose_task->setGoalPosition(offset);
 
-				pose_task->setGoalPosition(ee_pos + Vector3d(-0.1, -0.1, 0.1));
-				pose_task->setGoalOrientation(AngleAxisd(M_PI / 6, Vector3d::UnitX()).toRotationMatrix() * ee_ori);
-
-				// state = BALANCE;
+				state = BALANCE;
 			}
-
-
-			
-
-
 
 		} else if (state == BALANCE) {
 
+			Vector3d n;
+			n = zP;
 			
+			Vector3d s;
+            s << n(0)/n(2), n(1)/n(2), -1* (n(1)*n(1) + n(0)*n(0))/(n(2)*n(2));
+            s = s/s.norm();
+            MatrixXd proj = s * s.transpose();
+            VectorXd F_grav(3);
+            F_grav << 0, 0, -1*m*g;
+            F_grav = proj * F_grav;
+			MatrixXd Kp = MatrixXd::Identity(3, 3);
+			Kp = kp*Kp;
+			MatrixXd Kv = MatrixXd::Identity(3, 3);
+			Kv = kv*Kv;
+			inputForces = m*(-Kp*(ball_position_predicted - offset) - Kv*ball_velocity);
+	
 
-			// update goal position and orientation
-			ee_pos_desired << 0.5, 0.5, 0.5+0.3*sin(time);
-			pose_task->setGoalPosition(ee_pos_desired);
+			// F rotated in the frame of the plate
+			Vector3d F_rotated = ee_ori.transpose() * inputForces;	
 
+			float Fdx = F_rotated(0);
+			float Fdy = F_rotated(1);
+
+			float thr_zero_force = 1e-7;
+
+			Vector3d n_pi;
+
+			if (abs(Fdx) < thr_zero_force && abs(Fdy) > thr_zero_force) {
+				n_pi = Vector3d(1, 0, 0);
+				// cout << "a" << endl;
+			} else if (abs(Fdy) < thr_zero_force && abs(Fdx) > thr_zero_force) {
+				n_pi = Vector3d(0, 1, 0);
+				// cout << "b" << endl;
+			} else if (abs(Fdx) > thr_zero_force && abs(Fdy) > thr_zero_force) {
+				n_pi = Vector3d(Fdy, Fdx, 0)/sqrt(Fdx*Fdx + Fdy*Fdy);
+				// cout << "c" << endl;
+			} else {
+				// cout << "d" << endl;
+			}
+
+			float force_magnitude = sqrt(Fdx * Fdx + Fdy * Fdy);
+
+			cout << "force_magnitude: " << force_magnitude << endl;
+
+			float theta_npi = force_magnitude*1000;
+
+			Eigen::AngleAxisd rotation(theta_npi, n_pi);
+			Eigen::Matrix3d R = rotation.toRotationMatrix();
+
+			Matrix3d goal_orientation = R * ee_ori;
+
+			pose_task->setGoalOrientation(goal_orientation);
 
 			// update task model
 			N_prec.setIdentity();
 			pose_task->updateTaskModel(N_prec);
+			
 			joint_task->updateTaskModel(pose_task->getTaskAndPreviousNullspace());
 
 			command_torques = pose_task->computeTorques() + joint_task->computeTorques();
@@ -154,6 +273,7 @@ int main() {
 
 		// execute redis write callback
 		redis_client.setEigen(JOINT_TORQUES_COMMANDED_KEY, command_torques);
+
 	}
 
 	timer.stop();

@@ -110,6 +110,7 @@ int main() {
 	// start simulation thread
 	thread sim_thread(simulation, sim);
 
+
 	// while window is open:
 	while (graphics->isWindowOpen() && fSimulationRunning) {
         graphics->updateRobotGraphics(robot_name, redis_client.getEigen(JOINT_ANGLES_KEY));
@@ -119,6 +120,7 @@ int main() {
 				graphics->updateObjectGraphics(object_names[i], object_poses[i]);
 			}
 		}
+
 
 		graphics->renderGraphicsWorld();
 		{
@@ -169,7 +171,6 @@ void simulation(std::shared_ptr<SaiSimulation::SaiSimulation> sim) {
 		redis_client.setEigen(MOMENT_SENSOR_KEY, moment);
 
 
-
 		VectorXd control_torques = redis_client.getEigen(JOINT_TORQUES_COMMANDED_KEY);
 		{
 			lock_guard<mutex> lock(mutex_torques);
@@ -187,6 +188,9 @@ void simulation(std::shared_ptr<SaiSimulation::SaiSimulation> sim) {
 				object_poses[i] = sim->getObjectPose(object_names[i]);
 				object_velocities[i] = sim->getObjectVelocity(object_names[i]);
 			}
+
+			redis_client.setEigen(BALL_POS_KEY, object_poses[0].translation());
+			redis_client.setEigen(BALL_VEL_KEY, object_velocities[0]);
 		}
 
 	}

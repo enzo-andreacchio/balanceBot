@@ -10,3 +10,5 @@ const std::string JOINT_TORQUES_COMMANDED_KEY = "sai::sim::panda::actuators::fgc
 const std::string CONTROLLER_RUNNING_KEY = "sai::sim::panda::controller";
 const std::string FORCE_SENSOR_KEY = "sai::sim::panda::sensors::F";
 const std::string MOMENT_SENSOR_KEY = "sai::sim::panda::sensors::M";
+const std::string BALL_POS_KEY = "sai::sim::ball::position";
+const std::string BALL_VEL_KEY = "sai::sim::ball::velocity";
