@@ -27,7 +27,7 @@
 	</static_object>
 
 	<dynamic_object name="Ball">
-		<origin xyz="0.4 0.07 2" rpy="0 0 0" />
+		<origin xyz="0.4 0.09 2" rpy="0 0 0" />
 		<visual>
 			<origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
 			<geometry>

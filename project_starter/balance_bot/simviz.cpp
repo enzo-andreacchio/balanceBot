@@ -98,8 +98,8 @@ int main() {
     sim->setCollisionRestitution(0.0);
 
     // set co-efficient of friction
-    sim->setCoeffFrictionStatic(0.0);
-    sim->setCoeffFrictionDynamic(0.0);
+    sim->setCoeffFrictionStatic(0.3);
+    sim->setCoeffFrictionDynamic(0.2);
 
 	/*------- Set up visualization -------*/
 	// init redis client values 

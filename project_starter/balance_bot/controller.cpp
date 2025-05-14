@@ -66,6 +66,17 @@ Vector3d momentsToPositions(const Vector3d& n, const Vector3d& M) {
 	return r;
 }
 
+
+float sgn(float x) {
+	if (x > 0) {
+		return 1;
+	} else if (x < 0) {
+		return -1;
+	} else {
+		return 0;
+	}
+}
+
 int main() {
 	// Location of URDF files specifying world and robot information
 	static const string robot_file = string(CS225A_URDF_FOLDER) + "/panda/panda_arm_balance_bot.urdf";
@@ -179,8 +190,11 @@ int main() {
 		float Fz_thr1 = 1.0;
 		float Fz_thr2 = 10.0;
 
-		float kp = 150.0;
-		float kv = 0.0;
+		float kp = 30.0;
+		float kv = 20;
+
+		// float kp = 50.0;
+		// float kv = 20.0;
 
 		VectorXd inputForces(3);
 
@@ -191,9 +205,6 @@ int main() {
 			joint_task->updateTaskModel(N_prec);
 
 			command_torques = joint_task->computeTorques();
-
-
-
 
 
 			if (Fz > Fz_thr1 && Fz < Fz_thr2) {
@@ -211,7 +222,38 @@ int main() {
 
 			Vector3d n;
 			n = zP;
-			
+
+
+			// Spiral test
+			// float r1 = 0.05;
+			// float r0 = 0.01;
+			// float frequency = 0.5;
+			// float T  = 1.0/frequency;
+			// float r = r0 + cos(time/T)*(r1 - r0);
+
+			// Vector3d x_desired;
+			// x_desired << offset(0) + r*cos(2*M_PI*frequency*time), offset(1) + r*sin(2*M_PI*frequency*time), 0;
+			// Vector3d v_desired;
+			// v_desired << -r*2*M_PI*frequency*sin(2*M_PI*frequency*time), r*2*M_PI*frequency*cos(2*M_PI*frequency*time), 0;
+			// Vector3d acc_desired;
+			// acc_desired << -r*4*M_PI*M_PI*frequency*cos(2*M_PI*frequency*time), -r*4*M_PI*M_PI*frequency*sin(2*M_PI*frequency*time), 0;
+
+			// Circle test
+			// float r = 0.09;
+			// float frequency = 0.1;
+
+			// Vector3d x_desired;
+			// x_desired << offset(0) + r*cos(2*M_PI*frequency*time), offset(1) + r*sin(2*M_PI*frequency*time), 0;
+			// Vector3d v_desired;
+			// v_desired << -r*2*M_PI*frequency*sin(2*M_PI*frequency*time), r*2*M_PI*frequency*cos(2*M_PI*frequency*time), 0;
+			// Vector3d acc_desired;
+			// acc_desired << -r*4*M_PI*M_PI*frequency*cos(2*M_PI*frequency*time), -r*4*M_PI*M_PI*frequency*sin(2*M_PI*frequency*time), 0;
+
+			// // Linear test
+			Vector3d x_desired;
+			x_desired = offset + Vector3d(0.0, 0.00, 0.0);
+
+
 			Vector3d s;
             s << n(0)/n(2), n(1)/n(2), -1* (n(1)*n(1) + n(0)*n(0))/(n(2)*n(2));
             s = s/s.norm();
@@ -223,8 +265,9 @@ int main() {
 			Kp = kp*Kp;
 			MatrixXd Kv = MatrixXd::Identity(3, 3);
 			Kv = kv*Kv;
-			inputForces = m*(-Kp*(ball_position_predicted - offset) - Kv*ball_velocity);
-	
+			// inputForces = m*(-Kp*(ball_position_predicted - offset) - Kv*ball_velocity);
+			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity- v_desired) );
+			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity) );
 
 			// F rotated in the frame of the plate
 			Vector3d F_rotated = ee_ori.transpose() * inputForces;	
@@ -243,7 +286,7 @@ int main() {
 				n_pi = Vector3d(0, 1, 0);
 				// cout << "b" << endl;
 			} else if (abs(Fdx) > thr_zero_force && abs(Fdy) > thr_zero_force) {
-				n_pi = Vector3d(Fdy, Fdx, 0)/sqrt(Fdx*Fdx + Fdy*Fdy);
+				n_pi = Vector3d(-Fdy, Fdx, 0)/sqrt(Fdx*Fdx + Fdy*Fdy);
 				// cout << "c" << endl;
 			} else {
 				// cout << "d" << endl;
@@ -251,16 +294,20 @@ int main() {
 
 			float force_magnitude = sqrt(Fdx * Fdx + Fdy * Fdy);
 
-			cout << "force_magnitude: " << force_magnitude << endl;
-
-			float theta_npi = force_magnitude*1000;
+			float theta_npi;
+			theta_npi = force_magnitude*0.05;
+			
+			if (theta_npi > M_PI/6){
+				theta_npi = M_PI/6;
+			} else if (theta_npi < -M_PI/6) {
+				theta_npi = -M_PI/6;
+			} 
 
 			Eigen::AngleAxisd rotation(theta_npi, n_pi);
 			Eigen::Matrix3d R = rotation.toRotationMatrix();
 
-			Matrix3d goal_orientation = R * ee_ori;
-
-			pose_task->setGoalOrientation(goal_orientation);
+			// Matrix3d goal_orientation = R * ee_ori;
+			pose_task->setGoalOrientation(R);
 
 			// update task model
 			N_prec.setIdentity();
