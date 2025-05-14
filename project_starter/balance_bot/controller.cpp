@@ -31,7 +31,6 @@ enum State {
 	BALANCE
 };
 
-
 // Cross-product matrix operator
 Matrix3d crossProductOperator(const Vector3d& v) {
 	Matrix3d cross;
@@ -88,6 +87,9 @@ int main() {
 	// start redis client
 	auto redis_client = SaiCommon::RedisClient();
 	redis_client.connect();
+
+	// set the redis key for force to 0
+	redis_client.setEigen(FORCE_SENSOR_KEY, Vector3d::Zero());
 
 	// set up signal handler
 	signal(SIGABRT, &sighandler);
@@ -239,8 +241,8 @@ int main() {
 			// acc_desired << -r*4*M_PI*M_PI*frequency*cos(2*M_PI*frequency*time), -r*4*M_PI*M_PI*frequency*sin(2*M_PI*frequency*time), 0;
 
 			// Circle test
-			// float r = 0.09;
-			// float frequency = 0.1;
+			// float r = 0.07;
+			// float frequency = 0.5;
 
 			// Vector3d x_desired;
 			// x_desired << offset(0) + r*cos(2*M_PI*frequency*time), offset(1) + r*sin(2*M_PI*frequency*time), 0;
@@ -251,7 +253,7 @@ int main() {
 
 			// // Linear test
 			Vector3d x_desired;
-			x_desired = offset + Vector3d(0.0, 0.00, 0.0);
+			x_desired = offset + Vector3d(0.0, 0.09, 0.0);
 
 
 			Vector3d s;
@@ -267,7 +269,7 @@ int main() {
 			Kv = kv*Kv;
 			// inputForces = m*(-Kp*(ball_position_predicted - offset) - Kv*ball_velocity);
 			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity- v_desired) );
-			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity) );
+			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity));
 
 			// F rotated in the frame of the plate
 			Vector3d F_rotated = ee_ori.transpose() * inputForces;	
