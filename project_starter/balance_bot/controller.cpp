@@ -22,6 +22,13 @@ void sighandler(int){runloop = false;}
 
 const double m = 0.17;
 const double g = 9.81;
+const double timeStep = 0.3;
+const float kp = 30.0;
+const float kv = 20;
+const float Fz_thr = 1.0;
+const float plate_thickness = 0.01;
+const float saturation_angle = M_PI / 6;
+
 
 #include "redis_keys.h"
 
@@ -41,11 +48,11 @@ Matrix3d crossProductOperator(const Vector3d& v) {
 }
 
 // Computes position vector from moment vector
-Vector3d momentsToPositions(const Vector3d& n, const Vector3d& M) {
-	Vector3d norm_n = n.normalized(); // Normalize normal vector
+Vector3d momentsToPositions(Vector3d& zP, const Vector3d& M) {
+	zP = zP.normalized(); // Normalize normal vector in case it's not normalized
 	Vector3d e_z(0, 0, 1);
 
-	Matrix3d proj = norm_n * norm_n.transpose(); // Outer product (projection matrix)
+	Matrix3d proj = zP * zP.transpose(); // Outer product (projection matrix)
 	Vector3d F = proj * (-1.0 * m * g * e_z);
 	Vector3d Q_vec = -F;
 	Matrix3d Q = crossProductOperator(Q_vec);
@@ -61,8 +68,8 @@ Vector3d momentsToPositions(const Vector3d& n, const Vector3d& M) {
 	}
 	Matrix3d Q_pinv = svd.matrixV() * S_inv * svd.matrixU().transpose();
 
-	Vector3d r = Q_pinv * M;
-	return r;
+	Vector3d x = Q_pinv * M;
+	return x;
 }
 
 
@@ -140,7 +147,6 @@ int main() {
 
 	double previousTime;
 	previousTime = 0.0;
-	double timeStep = 0.3;
 
 	while (runloop) {
 		timer.waitForNextLoop();
@@ -151,34 +157,29 @@ int main() {
 		robot->setDq(redis_client.getEigen(JOINT_VELOCITIES_KEY));
 		robot->updateModel();
 
+		Vector3d ball_position = redis_client.getEigen(BALL_POS_KEY);
+		Vector3d ball_velocity_real = redis_client.getEigen(BALL_VEL_KEY);
+
+		Vector3d force = redis_client.getEigen(FORCE_SENSOR_KEY);
+		float Fz = force(2);
+
 		Vector3d ee_pos = robot->position(control_link, control_point);
 		Matrix3d ee_ori = robot->rotation(control_link);
 
 		Vector3d moment = redis_client.getEigen(MOMENT_SENSOR_KEY);
 		Vector3d zP = ee_ori.col(2); // Z-axis of the frame of the plate
 
+	
+
 		// Compute the position vector from the moment vector
 		Vector3d M = -moment; // Moment vector
-		Vector3d r = momentsToPositions(zP, M);
-		Vector3d offset(0.4, 0.0, 0.65-0.01514);			
-		Vector3d ball_position_predicted = r + offset;
+		Vector3d x = momentsToPositions(zP, M);
+		Vector3d offset(0.4, 0.0, 0.65-0.01514);
 
-		Vector3d ball_position = redis_client.getEigen(BALL_POS_KEY);
-
-		// cout << ball_position_predicted.transpose() << endl;
-		// cout << ball_position.transpose() << endl;
-
-		// // Numerical differentiation to compute ball velocity
-		// if (!first_iteration) {
-		// 	ball_velocity = (ball_position_predicted - ball_position_prev) * control_freq;
-		// } else {
-		// 	first_iteration = false;
-		// }
-		// ball_position_prev = ball_position_predicted;
-
-		Vector3d ball_velocity_real = redis_client.getEigen(BALL_VEL_KEY);
+		Vector3d ball_position_predicted = x + offset;
 
 
+		// Compute the ball velocity using a time step
 		double elapsedTime = time - previousTime;
 		if (elapsedTime > timeStep) {
 			ball_velocity = (ball_position_predicted - ball_position_prev) / elapsedTime;
@@ -186,30 +187,21 @@ int main() {
 			ball_position_prev = ball_position_predicted;
 		}
 
-
-		Vector3d force = redis_client.getEigen(FORCE_SENSOR_KEY);
-		float Fz = force(2);
-		float Fz_thr1 = 1.0;
-		float Fz_thr2 = 10.0;
-
-		float kp = 30.0;
-		float kv = 20;
-
-		// float kp = 50.0;
-		// float kv = 20.0;
-
 		VectorXd inputForces(3);
 
 	
 		if (state == IDLE) {
-			// update task model 
+			// update task model
 			N_prec.setIdentity();
-			joint_task->updateTaskModel(N_prec);
+			pose_task->updateTaskModel(N_prec);
 
-			command_torques = joint_task->computeTorques();
+			pose_task->setGoalPosition(offset);
+			pose_task->setGoalOrientation(Matrix3d::Identity());
+
+			command_torques = pose_task->computeTorques();
 
 
-			if (Fz > Fz_thr1 && Fz < Fz_thr2) {
+			if (Fz > Fz_thr) {
 				cout << "Idle to Balance" << endl;
 
 				pose_task->reInitializeTask();
@@ -224,33 +216,7 @@ int main() {
 
 			Vector3d n;
 			n = zP;
-
-
-			// Spiral test
-			// float r1 = 0.05;
-			// float r0 = 0.01;
-			// float frequency = 0.5;
-			// float T  = 1.0/frequency;
-			// float r = r0 + cos(time/T)*(r1 - r0);
-
-			// Vector3d x_desired;
-			// x_desired << offset(0) + r*cos(2*M_PI*frequency*time), offset(1) + r*sin(2*M_PI*frequency*time), 0;
-			// Vector3d v_desired;
-			// v_desired << -r*2*M_PI*frequency*sin(2*M_PI*frequency*time), r*2*M_PI*frequency*cos(2*M_PI*frequency*time), 0;
-			// Vector3d acc_desired;
-			// acc_desired << -r*4*M_PI*M_PI*frequency*cos(2*M_PI*frequency*time), -r*4*M_PI*M_PI*frequency*sin(2*M_PI*frequency*time), 0;
-
-			// Circle test
-			// float r = 0.07;
-			// float frequency = 0.5;
-
-			// Vector3d x_desired;
-			// x_desired << offset(0) + r*cos(2*M_PI*frequency*time), offset(1) + r*sin(2*M_PI*frequency*time), 0;
-			// Vector3d v_desired;
-			// v_desired << -r*2*M_PI*frequency*sin(2*M_PI*frequency*time), r*2*M_PI*frequency*cos(2*M_PI*frequency*time), 0;
-			// Vector3d acc_desired;
-			// acc_desired << -r*4*M_PI*M_PI*frequency*cos(2*M_PI*frequency*time), -r*4*M_PI*M_PI*frequency*sin(2*M_PI*frequency*time), 0;
-
+			
 			// // Linear test
 			Vector3d x_desired;
 			x_desired = offset + Vector3d(0.0, 0.09, 0.0);
@@ -260,16 +226,16 @@ int main() {
             s << n(0)/n(2), n(1)/n(2), -1* (n(1)*n(1) + n(0)*n(0))/(n(2)*n(2));
             s = s/s.norm();
             MatrixXd proj = s * s.transpose();
-            VectorXd F_grav(3);
-            F_grav << 0, 0, -1*m*g;
-            F_grav = proj * F_grav;
-			MatrixXd Kp = MatrixXd::Identity(3, 3);
-			Kp = kp*Kp;
-			MatrixXd Kv = MatrixXd::Identity(3, 3);
-			Kv = kv*Kv;
-			// inputForces = m*(-Kp*(ball_position_predicted - offset) - Kv*ball_velocity);
+            VectorXd F_g(3);
+            F_g << 0, 0, -1*m*g;
+            Vector3d F_g_prll;
+			F_g_prll = proj * F_g;
+
+			MatrixXd Kp = kp * MatrixXd::Identity(3, 3);
+			MatrixXd Kv = kv * MatrixXd::Identity(3, 3);
+			
 			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity- v_desired) );
-			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity));
+			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity)) - F_g_prll;
 
 			// F rotated in the frame of the plate
 			Vector3d F_rotated = ee_ori.transpose() * inputForces;	
@@ -279,36 +245,24 @@ int main() {
 
 			float thr_zero_force = 1e-7;
 
-			Vector3d n_pi;
+			Vector3d n_Pi;
 
-			if (abs(Fdx) < thr_zero_force && abs(Fdy) > thr_zero_force) {
-				n_pi = Vector3d(1, 0, 0);
-				// cout << "a" << endl;
-			} else if (abs(Fdy) < thr_zero_force && abs(Fdx) > thr_zero_force) {
-				n_pi = Vector3d(0, 1, 0);
-				// cout << "b" << endl;
-			} else if (abs(Fdx) > thr_zero_force && abs(Fdy) > thr_zero_force) {
-				n_pi = Vector3d(-Fdy, Fdx, 0)/sqrt(Fdx*Fdx + Fdy*Fdy);
-				// cout << "c" << endl;
-			} else {
-				// cout << "d" << endl;
-			}
+			n_Pi = Vector3d(-Fdy, Fdx, 0)/sqrt(Fdx*Fdx + Fdy*Fdy);;
 
 			float force_magnitude = sqrt(Fdx * Fdx + Fdy * Fdy);
 
 			float theta_npi;
 			theta_npi = force_magnitude*0.05;
 			
-			if (theta_npi > M_PI/6){
-				theta_npi = M_PI/6;
-			} else if (theta_npi < -M_PI/6) {
-				theta_npi = -M_PI/6;
+			if (theta_npi > saturation_angle){
+				theta_npi = saturation_angle;
+			} else if (theta_npi < -saturation_angle) {
+				theta_npi = -saturation_angle;
 			} 
 
-			Eigen::AngleAxisd rotation(theta_npi, n_pi);
+			Eigen::AngleAxisd rotation(theta_npi, n_Pi);
 			Eigen::Matrix3d R = rotation.toRotationMatrix();
 
-			// Matrix3d goal_orientation = R * ee_ori;
 			pose_task->setGoalOrientation(R);
 
 			// update task model
