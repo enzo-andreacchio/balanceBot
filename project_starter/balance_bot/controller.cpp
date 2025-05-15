@@ -88,11 +88,6 @@ int main() {
 	auto joint_task = std::make_shared<SaiPrimitives::JointTask>(robot);
 	joint_task->setGains(400, 40, 0);
 
-	VectorXd q_desired(dof);
-	q_desired << -73.05, -57.93, 64.52, -144.73, -128.29, 77.12, 40.70;
-	q_desired *= M_PI / 180.0;
-	joint_task->setGoalPosition(q_desired);
-
 	VectorXd ee_pos_desired(3); 
 
 	Vector3d ball_position_prev = Vector3d::Zero();
