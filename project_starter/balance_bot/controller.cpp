@@ -23,8 +23,8 @@ void sighandler(int){runloop = false;}
 const double m = 0.17;
 const double g = 9.81;
 const double timeStep = 0.3;
-const float kp = 30.0;
-const float kv = 20;
+const float kp = 50.0;
+const float kv = 50;
 const float Fz_thr = 0.1;
 const float plate_thickness = 0.01;
 const float saturation_angle = M_PI / 6;
@@ -175,7 +175,7 @@ int main() {
 			x_desired = offset;
 
 			Vector3d plate_position_desired;
-			plate_position_desired = Vector3d(0.4, 0.0, 0.65+0.2*cos(10*time));
+			plate_position_desired = Vector3d(0.4, 0.0 + 0.1*sin(2*time), 0.65+0.1*cos(2*time));
 			pose_task->setGoalPosition(plate_position_desired);
 
 
