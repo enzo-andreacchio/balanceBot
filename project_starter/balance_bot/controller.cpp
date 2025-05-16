@@ -24,7 +24,7 @@ const double m = 0.17;
 const double g = 9.81;
 const double timeStep = 0.3;
 const float kp = 50.0;
-const float kv = 50;
+const float kv = 30;
 const float Fz_thr = 0.1;
 const float plate_thickness = 0.01;
 const float saturation_angle = M_PI / 6;
@@ -118,6 +118,7 @@ int main() {
 
 		Vector3d ee_pos = robot->position(control_link, control_point);
 		Matrix3d ee_ori = robot->rotation(control_link);
+		Vector3d ee_acceleration = robot->acceleration6d(control_link, control_point).head(3);
 
 		Vector3d moment = redis_client.getEigen(MOMENT_SENSOR_KEY);
 		Vector3d zP = ee_ori.col(2); // Z-axis of the frame of the plate
@@ -139,6 +140,7 @@ int main() {
 			previousTime = time;
 			ball_position_prev = ball_position_predicted;
 		}
+
 
 		VectorXd inputForces(3);
 
@@ -172,10 +174,25 @@ int main() {
 
 			// // Linear test
 			Vector3d x_desired;
-			x_desired = offset;
+			
+
+			double T = 8; // seconds
+			double t_mod = fmod(time, 2.0*T);
+			double angle;
+			if (t_mod < T) {
+				angle = 2.0 * M_PI * t_mod / T;
+			} else {
+				angle = 2.0 * M_PI * (2.0*T-t_mod) / T;
+			}
+
+			x_desired = offset + Vector3d(0.1*cos(angle), 0.1*sin(angle),0.0);
+
+
+
 
 			Vector3d plate_position_desired;
-			plate_position_desired = Vector3d(0.4, 0.0 + 0.1*sin(2*time), 0.65+0.1*cos(2*time));
+			// plate_position_desired = Vector3d(0.4, 0.0 + 0.1*sin(2*time), 0.65+0.1*cos(2*time));
+			plate_position_desired = Vector3d(0.4, 0.0, 0.65);
 			pose_task->setGoalPosition(plate_position_desired);
 
 
@@ -190,9 +207,14 @@ int main() {
 
 			MatrixXd Kp = kp * MatrixXd::Identity(3, 3);
 			MatrixXd Kv = kv * MatrixXd::Identity(3, 3);
+
+			float kt = 5;
+			MatrixXd Kt = kt * MatrixXd::Identity(3, 3);
 			
-			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity- v_desired) );
-			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity)) - F_g_prll;
+			
+
+			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*ball_velocity) - F_g_prll;
+			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity) - ee_acceleration) - F_g_prll;
 
 			// F rotated in the frame of the plate
 			Vector3d F_rotated = ee_ori.transpose() * inputForces;	

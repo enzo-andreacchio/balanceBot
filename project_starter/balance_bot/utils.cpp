@@ -1,4 +1,6 @@
 #include "utils.h"
+#include <stdio.h>
+#include <math.h>
 
 using namespace std;
 using namespace Eigen;
@@ -53,7 +55,7 @@ std::tuple<VectorXd, VectorXd> drawTripleSpiral(float freq, float time, float ra
 
 
 	float period = 1/freq;
-	time = time % period;
+	time = std::fmod(time, period);
 	float theta = 2 * M_PI *time / period;
 	
 	
@@ -77,8 +79,8 @@ std::tuple<VectorXd, VectorXd> drawTripleSpiral(float freq, float time, float ra
 	float drdt = -1* radius*sin(3* theta) *3*dthetdt;
 	
 	
-	float dxdt = drdt*cos(theta) + r*-1*sin(theta)*dthetadt;
-	float dydt = drdt*sin(theta) + r*cos(theta)*dthetadt;
+	float dxdt = drdt*cos(theta) + r*-1*sin(theta)*dthetdt;
+	float dydt = drdt*sin(theta) + r*cos(theta)*dthetdt;
 	
 	
 	vel << dxdt, dydt;
@@ -95,7 +97,7 @@ std::tuple<VectorXd, VectorXd> drawCircle(float freq, float time, float radius) 
 	
 	
 	float period = 1/freq;
-	time = time % period;
+	time = std::fmod(time, period);
 	float theta = 2 * M_PI *time / period;
 	
 	
@@ -131,11 +133,11 @@ std::tuple<VectorXd, VectorXd> drawCircleAlternate(float freq, float time, float
 	
 	float period = 1/freq;
 	float count = (static_cast<int>(time/ period))%2;
-	float time = time % period;
+	time = std::fmod(time, period);
 	
 	
 	if (count == 1) {
-	time = 1 - time;
+		time = 1 - time;
 	}
 	float theta = 2 * M_PI *time / period;
 	
@@ -172,16 +174,16 @@ std::tuple<VectorXd, VectorXd> drawCircleAlternate(float freq, float time, float
 	return pos_vel;
 }
 	
-std::tuple<VectorXd, VectorXd> drawSpiralAlternate(float freq, float time, float r1, float r2, float coils) {
+std::tuple<VectorXd, VectorXd> drawSpiralAlternate(float freq, float time, float r1, float r2, float num_coils) {
 	
 	
 	float period = 1/freq;
 	float count = (static_cast<int>(time/ period))%2;
-	time = time % period;
+	time = std::fmod(time, period);
 	
 	
 	if (count == 1) {
-	time = 1 - time;
+		time = 1 - time;
 	}
 	
 	
