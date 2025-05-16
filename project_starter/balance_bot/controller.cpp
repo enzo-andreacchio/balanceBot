@@ -25,7 +25,7 @@ const double g = 9.81;
 const double timeStep = 0.3;
 const float kp = 30.0;
 const float kv = 20;
-const float Fz_thr = 1.0;
+const float Fz_thr = 0.1;
 const float plate_thickness = 0.01;
 const float saturation_angle = M_PI / 6;
 
@@ -74,7 +74,7 @@ int main() {
 
 	// arm task
 	const string control_link = "link7";
-	const Vector3d control_point = Vector3d(0, 0, 0.17);
+	const Vector3d control_point = Vector3d(0, 0, 0.17+plate_thickness);
 	Affine3d compliant_frame = Affine3d::Identity();
 	compliant_frame.translation() = control_point;
 	auto pose_task = std::make_shared<SaiPrimitives::MotionForceTask>(robot, control_link, compliant_frame);
@@ -172,7 +172,11 @@ int main() {
 
 			// // Linear test
 			Vector3d x_desired;
-			x_desired = offset + Vector3d(0.0, 0.09, 0.0);
+			x_desired = offset;
+
+			Vector3d plate_position_desired;
+			plate_position_desired = Vector3d(0.4, 0.0, 0.65+0.2*cos(10*time));
+			pose_task->setGoalPosition(plate_position_desired);
 
 
 			Vector3d s;
