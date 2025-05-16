@@ -48,3 +48,182 @@ float sgn(float x) {
 		return 0;
 	}
 }
+
+std::tuple<VectorXd, VectorXd> drawTripleSpiral(float freq, float time, float radius) {
+
+
+	float period = 1/freq;
+	time = time % period;
+	float theta = 2 * M_PI *time / period;
+	
+	
+	float r = radius* cos(3*theta);
+	
+	
+	float x = r * cos(theta);
+	float y = r * sin(theta);
+	
+	
+	VectorXd pos(2);
+	VectorXd vel(2);
+	
+	
+	pos << x, y;
+	
+	
+	float dthetdt = 2 * M_PI/ period;
+	
+	
+	float drdt = -1* radius*sin(3* theta) *3*dthetdt;
+	
+	
+	float dxdt = drdt*cos(theta) + r*-1*sin(theta)*dthetadt;
+	float dydt = drdt*sin(theta) + r*cos(theta)*dthetadt;
+	
+	
+	vel << dxdt, dydt;
+	
+	
+	std::tuple<VectorXd, VectorXd> pos_vel = std::make_tuple(pos, vel);
+	
+	
+	return pos_vel;
+}
+	
+	
+std::tuple<VectorXd, VectorXd> drawCircle(float freq, float time, float radius) {
+	
+	
+	float period = 1/freq;
+	time = time % period;
+	float theta = 2 * M_PI *time / period;
+	
+	
+	float x = radius * cos(theta);
+	float y = radius * sin(theta);
+	
+	
+	float dthetdt = 2 * M_PI/ period;
+	
+	
+	VectorXd pos(2);
+	VectorXd vel(2);
+	
+	
+	pos << x, y;
+	
+	
+	float dxdt = -1*radius*sin(theta)*dthetdt;
+	float dydt = -1*radius*cos(theta)*dthetdt;
+	
+	
+	vel << dxdt, dydt;
+	
+	
+	std::tuple<VectorXd, VectorXd> pos_vel = std::make_tuple(pos, vel);
+	
+	
+	return pos_vel;
+}
+	
+std::tuple<VectorXd, VectorXd> drawCircleAlternate(float freq, float time, float radius) {
+	
+	
+	float period = 1/freq;
+	float count = (static_cast<int>(time/ period))%2;
+	float time = time % period;
+	
+	
+	if (count == 1) {
+	time = 1 - time;
+	}
+	float theta = 2 * M_PI *time / period;
+	
+	
+	float x = radius * cos(theta);
+	float y = radius * sin(theta);
+	
+	
+	float dthetdt = 2 * M_PI/ period;
+	
+	
+	if (count == 1) {
+	dthetdt *= -1;
+	}
+	
+	
+	VectorXd pos(2);
+	VectorXd vel(2);
+	
+	
+	pos << x, y;
+	
+	
+	float dxdt = -1*radius*sin(theta)*dthetdt;
+	float dydt = -1*radius*cos(theta)*dthetdt;
+	
+	
+	vel << dxdt, dydt;
+	
+	
+	std::tuple<VectorXd, VectorXd> pos_vel = std::make_tuple(pos, vel);
+	
+	
+	return pos_vel;
+}
+	
+std::tuple<VectorXd, VectorXd> drawSpiralAlternate(float freq, float time, float r1, float r2, float coils) {
+	
+	
+	float period = 1/freq;
+	float count = (static_cast<int>(time/ period))%2;
+	time = time % period;
+	
+	
+	if (count == 1) {
+	time = 1 - time;
+	}
+	
+	
+	float theta = 2 * M_PI *num_coils * time / period;
+	
+	
+	float r = r1 + (time/period) * (r2 - r1);
+	
+	
+	float x = r * cos(theta);
+	float y = r * sin(theta);
+	
+	
+	VectorXd pos(2);
+	VectorXd vel(2);
+	
+	
+	pos << x, y;
+	
+	
+	float drdt = (r2 - r1)/period;
+	
+	
+	float dthetdt = 2 * M_PI * num_coils/ period;
+	
+	
+	if (count == 1) {
+	dthetdt *= -1;
+	}
+	
+	
+	float dxdt = drdt*cos(theta) + r*-1*sin(theta)*dthetdt;
+	float dydt = drdt*sin(theta) + r*cos(theta)*dthetdt;
+	
+	
+	vel << dxdt, dydt;
+	
+	
+	std::tuple<VectorXd, VectorXd> pos_vel = std::make_tuple(pos, vel);
+	
+	
+	return pos_vel;
+}
+	
+	
