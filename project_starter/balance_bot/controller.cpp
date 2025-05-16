@@ -23,11 +23,12 @@ void sighandler(int){runloop = false;}
 const double m = 0.17;
 const double g = 9.81;
 const double timeStep = 0.3;
-const float kp = 50.0;
-const float kv = 30;
+float kp = 50.0;
+float kv = 50;
+float k_theta = 0.05;
 const float Fz_thr = 0.1;
 const float plate_thickness = 0.01;
-const float saturation_angle = M_PI / 6;
+const float saturation_angle = M_PI / 4;
 
 
 #include "redis_keys.h"
@@ -111,7 +112,6 @@ int main() {
 		robot->updateModel();
 
 		Vector3d ball_position = redis_client.getEigen(BALL_POS_KEY);
-		Vector3d ball_velocity_real = redis_client.getEigen(BALL_VEL_KEY);
 
 		Vector3d force = redis_client.getEigen(FORCE_SENSOR_KEY);
 		float Fz = force(2);
@@ -119,6 +119,9 @@ int main() {
 		Vector3d ee_pos = robot->position(control_link, control_point);
 		Matrix3d ee_ori = robot->rotation(control_link);
 		Vector3d ee_acceleration = robot->acceleration6d(control_link, control_point).head(3);
+		Vector3d plate_velocity = robot->velocity6d(control_link, control_point).head(3);
+
+		
 
 		Vector3d moment = redis_client.getEigen(MOMENT_SENSOR_KEY);
 		Vector3d zP = ee_ori.col(2); // Z-axis of the frame of the plate
@@ -140,6 +143,12 @@ int main() {
 			previousTime = time;
 			ball_position_prev = ball_position_predicted;
 		}
+
+		Vector3d ball_velocity_in_plate = ball_velocity - plate_velocity;
+		Vector3d ball_position_in_plate = ball_position - ee_pos;
+		// dot product between ball_velocity_in_plate & ball_position_in_plate
+		float direction = ball_velocity_in_plate.dot(ball_position_in_plate);
+
 
 
 		VectorXd inputForces(3);
@@ -176,7 +185,7 @@ int main() {
 			Vector3d x_desired;
 			
 
-			double T = 8; // seconds
+			double T = 16; // seconds
 			double t_mod = fmod(time, 2.0*T);
 			double angle;
 			if (t_mod < T) {
@@ -187,12 +196,14 @@ int main() {
 
 			x_desired = offset + Vector3d(0.1*cos(angle), 0.1*sin(angle),0.0);
 
+			x_desired = offset;
+
 
 
 
 			Vector3d plate_position_desired;
-			// plate_position_desired = Vector3d(0.4, 0.0 + 0.1*sin(2*time), 0.65+0.1*cos(2*time));
-			plate_position_desired = Vector3d(0.4, 0.0, 0.65);
+			plate_position_desired = Vector3d(0.4, 0.0 + 0.1*sin(2*time), 0.65+0.1*cos(2*time));
+			// plate_position_desired = Vector3d(0.4, 0.0, 0.65);
 			pose_task->setGoalPosition(plate_position_desired);
 
 
@@ -208,8 +219,6 @@ int main() {
 			MatrixXd Kp = kp * MatrixXd::Identity(3, 3);
 			MatrixXd Kv = kv * MatrixXd::Identity(3, 3);
 
-			float kt = 5;
-			MatrixXd Kt = kt * MatrixXd::Identity(3, 3);
 			
 			
 
@@ -231,7 +240,13 @@ int main() {
 			float force_magnitude = sqrt(Fdx * Fdx + Fdy * Fdy);
 
 			float theta_npi;
-			theta_npi = force_magnitude*0.05;
+
+			theta_npi = force_magnitude*k_theta;
+
+			// if (direction > 0.7) {
+			// 	theta_npi = force_magnitude*k_theta*ball_velocity_in_plate.norm()*3/0.1;
+			// }
+
 			
 			if (theta_npi > saturation_angle){
 				theta_npi = saturation_angle;

@@ -1,0 +1,4 @@
+/Users/enzoandreacchio/OpenSai/balanceBot/CMakeFiles/OpenSai_main.dir
+/Users/enzoandreacchio/OpenSai/balanceBot/CMakeFiles/Tutorials_OpenSai.dir
+/Users/enzoandreacchio/OpenSai/balanceBot/CMakeFiles/edit_cache.dir
+/Users/enzoandreacchio/OpenSai/balanceBot/CMakeFiles/rebuild_cache.dir
