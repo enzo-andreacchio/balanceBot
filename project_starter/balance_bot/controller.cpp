@@ -3,11 +3,12 @@
  * @brief Controller file
  * 
  */
-
+#include <signal.h>
 #include <SaiModel.h>
 #include "SaiPrimitives.h"
 #include "redis/RedisClient.h"
 #include "timer/LoopTimer.h"
+#include "redis/keys/chai_haptic_devices_driver.h"
 
 #include <iostream>
 #include <string>
@@ -15,6 +16,8 @@
 using namespace std;
 using namespace Eigen;
 using namespace SaiPrimitives;
+using namespace SaiCommon::ChaiHapticDriverKeys;
+const string link_name = "link7";
 
 #include <signal.h>
 bool runloop = false;
@@ -41,7 +44,6 @@ enum State {
 };
 
 
-
 int main() {
 	// Location of URDF files specifying world and robot information
 	static const string robot_file = string(CS225A_URDF_FOLDER) + "/panda/panda_arm_balance_bot.urdf";
@@ -51,7 +53,7 @@ int main() {
 	string controller_status = "1";
 	
 	// start redis client
-	auto redis_client = SaiCommon::RedisClient();
+	auto redis_client = SaiCommon::RedisClient("sai");
 	redis_client.connect();
 
 	// set the redis key for force to 0
@@ -72,6 +74,38 @@ int main() {
 	int dof = robot->dof();
 	VectorXd command_torques = VectorXd::Zero(dof);  // panda + gripper torques 
 	MatrixXd N_prec = MatrixXd::Identity(dof, dof);
+	
+	//Create Haptic Controller
+SaiPrimitives::HapticDeviceController::DeviceLimits device_limits(
+		redis_client.getEigen(createRedisKey(MAX_STIFFNESS_KEY_SUFFIX, 0)),
+		redis_client.getEigen(createRedisKey(MAX_DAMPING_KEY_SUFFIX, 0)),
+		redis_client.getEigen(createRedisKey(MAX_FORCE_KEY_SUFFIX, 0)));
+SaiPrimitives::HapticControllerInput haptic_input;
+SaiPrimitives::HapticControllerOutput haptic_output;
+auto haptic_controller =
+		make_shared<SaiPrimitives::HapticDeviceController>(
+			device_limits, robot->transformInWorld(link_name));
+haptic_controller->setScalingFactors(3.5);
+	haptic_controller->setReductionFactorForce(0.7);
+	VectorXd variable_damping_thresholds(2);
+	variable_damping_thresholds << 0.25, 0.35;
+	VectorXd variable_damping_gains(2);
+	variable_damping_gains << 0, 20;
+	haptic_controller->setVariableDampingGainsPos(variable_damping_thresholds,
+												  variable_damping_gains);
+haptic_controller->setHapticControlType(
+		SaiPrimitives::HapticControlType::MOTION_MOTION);
+//Setup Redis Communication
+redis_client.addToReceiveGroup(createRedisKey(POSITION_KEY_SUFFIX, 0),
+								   haptic_input.device_position);
+	redis_client.addToReceiveGroup(createRedisKey(ROTATION_KEY_SUFFIX, 0),
+								   haptic_input.device_orientation);
+	redis_client.addToReceiveGroup(
+		createRedisKey(LINEAR_VELOCITY_KEY_SUFFIX, 0),
+		haptic_input.device_linear_velocity);
+	redis_client.addToReceiveGroup(
+		createRedisKey(ANGULAR_VELOCITY_KEY_SUFFIX, 0),
+		haptic_input.device_angular_velocity);
 
 	// arm task
 	const string control_link = "link7";
@@ -196,14 +230,25 @@ int main() {
 
 			x_desired = offset + Vector3d(0.1*cos(angle), 0.1*sin(angle),0.0);
 
-			x_desired = offset;
+			//x_desired = offset;
+			
+			// read haptic device state from redis
+		redis_client.receiveAllFromGroup();
+			
+			// Update from haptic device
+                        haptic_input.device_position = redis_client.getEigen(createRedisKey(POSITION_KEY_SUFFIX, 0));
+                        haptic_input.device_orientation = redis_client.getEigen(createRedisKey(ROTATION_KEY_SUFFIX, 0));
+                        haptic_input.device_linear_velocity = redis_client.getEigen(createRedisKey(LINEAR_VELOCITY_KEY_SUFFIX, 0));
+                        haptic_input.device_angular_velocity = redis_client.getEigen(createRedisKey(ANGULAR_VELOCITY_KEY_SUFFIX, 0));
+                        haptic_output = haptic_controller->computeHapticControl(haptic_input);
 
 
 
 
 			Vector3d plate_position_desired;
-			plate_position_desired = Vector3d(0.4, 0.0 + 0.1*sin(2*time), 0.65+0.1*cos(2*time));
-			// plate_position_desired = Vector3d(0.4, 0.0, 0.65);
+			//plate_position_desired = Vector3d(0.4, 0.0 + 0.1*sin(2*time), 0.65+0.1*cos(2*time));
+			//plate_position_desired = Vector3d(0.4, 0.0, 0.65);
+			plate_position_desired = haptic_output.robot_goal_position;
 			pose_task->setGoalPosition(plate_position_desired);
 
 
@@ -222,7 +267,7 @@ int main() {
 			
 			
 
-			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*ball_velocity) - F_g_prll;
+			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*ball_velocity) + F_g_prll;
 			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity) - ee_acceleration) - F_g_prll;
 
 			// F rotated in the frame of the plate

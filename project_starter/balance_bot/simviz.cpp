@@ -60,7 +60,7 @@ int main() {
 
 
 	// start redis client
-	auto redis_client = SaiCommon::RedisClient();
+	auto redis_client = SaiCommon::RedisClient("sai");
 	redis_client.connect();
 
 	// set up signal handler
@@ -141,7 +141,7 @@ void simulation(std::shared_ptr<SaiSimulation::SaiSimulation> sim) {
 	// fSimulationRunning = true;
 
     // create redis client
-    auto redis_client = SaiCommon::RedisClient();
+    auto redis_client = SaiCommon::RedisClient("sai");
     redis_client.connect();
 
 	// create a timer
