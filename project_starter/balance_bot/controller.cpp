@@ -17,7 +17,7 @@ using namespace std;
 using namespace Eigen;
 using namespace SaiPrimitives;
 using namespace SaiCommon::ChaiHapticDriverKeys;
-const string link_name = "link7";
+const string link_name = "end-effector";
 
 #include <signal.h>
 bool runloop = false;
@@ -94,8 +94,20 @@ haptic_controller->setScalingFactors(3.5);
 	haptic_controller->setVariableDampingGainsPos(variable_damping_thresholds,
 												  variable_damping_gains);
 haptic_controller->setHapticControlType(
-		SaiPrimitives::HapticControlType::MOTION_MOTION);
+		SaiPrimitives::HapticControlType::HOMING);
+haptic_controller->disableOrientationTeleop();
+bool haptic_button_was_pressed = false;
+	int haptic_button_is_pressed = 0;
+	redis_client.setInt(createRedisKey(SWITCH_PRESSED_KEY_SUFFIX, 0),
+						haptic_button_is_pressed);
+	redis_client.setInt(createRedisKey(USE_GRIPPER_AS_SWITCH_KEY_SUFFIX, 0), 1);
+	
 //Setup Redis Communication
+
+redis_client.addToSendGroup(createRedisKey(COMMANDED_FORCE_KEY_SUFFIX, 0),
+								haptic_output.device_command_force);
+	redis_client.addToSendGroup(createRedisKey(COMMANDED_TORQUE_KEY_SUFFIX, 0),
+								haptic_output.device_command_moment);
 redis_client.addToReceiveGroup(createRedisKey(POSITION_KEY_SUFFIX, 0),
 								   haptic_input.device_position);
 	redis_client.addToReceiveGroup(createRedisKey(ROTATION_KEY_SUFFIX, 0),
@@ -106,6 +118,8 @@ redis_client.addToReceiveGroup(createRedisKey(POSITION_KEY_SUFFIX, 0),
 	redis_client.addToReceiveGroup(
 		createRedisKey(ANGULAR_VELOCITY_KEY_SUFFIX, 0),
 		haptic_input.device_angular_velocity);
+	redis_client.addToReceiveGroup(createRedisKey(SWITCH_PRESSED_KEY_SUFFIX, 0),
+								   haptic_button_is_pressed);
 
 	// arm task
 	const string control_link = "link7";
@@ -183,9 +197,48 @@ redis_client.addToReceiveGroup(createRedisKey(POSITION_KEY_SUFFIX, 0),
 		// dot product between ball_velocity_in_plate & ball_position_in_plate
 		float direction = ball_velocity_in_plate.dot(ball_position_in_plate);
 
-
-
 		VectorXd inputForces(3);
+
+		// read haptic device state from redis
+		redis_client.receiveAllFromGroup();
+		
+		// compute haptic control
+		haptic_input.robot_position = offset;
+		haptic_input.robot_orientation = robot->rotationInWorld(link_name);
+		haptic_input.robot_linear_velocity =
+			robot->linearVelocityInWorld(link_name);
+		haptic_input.robot_angular_velocity =
+			robot->angularVelocityInWorld(link_name);
+		haptic_input.robot_sensed_force = Vector3d::Zero();
+		haptic_input.robot_sensed_moment = Vector3d::Zero();
+
+		haptic_output = haptic_controller->computeHapticControl(haptic_input);
+
+		redis_client.sendAllFromGroup();
+		
+  // state machine for button presses
+		if (haptic_controller->getHapticControlType() ==
+				SaiPrimitives::HapticControlType::HOMING &&
+			haptic_controller->getHomed() && haptic_button_is_pressed) {
+			haptic_controller->setHapticControlType(
+				SaiPrimitives::HapticControlType::MOTION_MOTION);
+			haptic_controller->setDeviceControlGains(200.0, 15.0);
+			cout << "haptic device homed" << endl;
+		}
+
+		if (haptic_controller->getHapticControlType() ==
+				SaiPrimitives::HapticControlType::MOTION_MOTION &&
+			haptic_button_is_pressed && !haptic_button_was_pressed) {
+			haptic_controller->setHapticControlType(
+				SaiPrimitives::HapticControlType::CLUTCH);
+		} else if (haptic_controller->getHapticControlType() ==
+					   SaiPrimitives::HapticControlType::CLUTCH &&
+				   !haptic_button_is_pressed && haptic_button_was_pressed) {
+			haptic_controller->setHapticControlType(
+				SaiPrimitives::HapticControlType::MOTION_MOTION);
+		}
+
+		haptic_button_was_pressed = haptic_button_is_pressed;
 
 	
 		if (state == IDLE) {
@@ -228,22 +281,10 @@ redis_client.addToReceiveGroup(createRedisKey(POSITION_KEY_SUFFIX, 0),
 				angle = 2.0 * M_PI * (2.0*T-t_mod) / T;
 			}
 
-			x_desired = offset + Vector3d(0.1*cos(angle), 0.1*sin(angle),0.0);
+			//x_desired = offset + Vector3d(0.1*cos(angle), 0.1*sin(angle),0.0);
 
-			//x_desired = offset;
-			
-			// read haptic device state from redis
-		redis_client.receiveAllFromGroup();
-			
-			// Update from haptic device
-                        haptic_input.device_position = redis_client.getEigen(createRedisKey(POSITION_KEY_SUFFIX, 0));
-                        haptic_input.device_orientation = redis_client.getEigen(createRedisKey(ROTATION_KEY_SUFFIX, 0));
-                        haptic_input.device_linear_velocity = redis_client.getEigen(createRedisKey(LINEAR_VELOCITY_KEY_SUFFIX, 0));
-                        haptic_input.device_angular_velocity = redis_client.getEigen(createRedisKey(ANGULAR_VELOCITY_KEY_SUFFIX, 0));
-                        haptic_output = haptic_controller->computeHapticControl(haptic_input);
-
-
-
+			x_desired = offset;
+                        
 
 			Vector3d plate_position_desired;
 			//plate_position_desired = Vector3d(0.4, 0.0 + 0.1*sin(2*time), 0.65+0.1*cos(2*time));
@@ -267,7 +308,7 @@ redis_client.addToReceiveGroup(createRedisKey(POSITION_KEY_SUFFIX, 0),
 			
 			
 
-			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*ball_velocity) + F_g_prll;
+			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*ball_velocity) - F_g_prll;
 			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity) - ee_acceleration) - F_g_prll;
 
 			// F rotated in the frame of the plate
