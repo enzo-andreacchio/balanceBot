@@ -98,7 +98,7 @@ int main() {
     sim->setCollisionRestitution(0.0);
 
     // set co-efficient of friction
-    sim->setCoeffFrictionStatic(0.3);
+    sim->setCoeffFrictionStatic(0.2);
     sim->setCoeffFrictionDynamic(0.2);
 
 	/*------- Set up visualization -------*/

@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
             cerr << "Trailing characters after number: " << arg << '\n';
             return 1;
         }
-        else if (controller_number < 1 || controller_number > 3) {
+        else if (controller_number < 0 || controller_number > 4) {
             cout << "Incorrect controller number" << endl;
             return 1;
         }
@@ -194,7 +194,7 @@ int main(int argc, char** argv) {
 			command_torques = pose_task->computeTorques();
 
 
-			if (Fz > Fz_thr) {
+			if (Fz > Fz_thr && controller_number > 0) {
 				cout << "Idle to Balance" << endl;
 
 				pose_task->reInitializeTask();
@@ -210,32 +210,58 @@ int main(int argc, char** argv) {
 			Vector3d n;
 			n = zP;
 
+			
+			
+			// center in one sense and then in the other
+			// double T = 16; // seconds
+			// double t_mod = fmod(time, 2.0*T);
+			// double angle;
+			// if (t_mod < T) {
+			// 	angle = 2.0 * M_PI * t_mod / T;
+			// } else {
+			// 	angle = 2.0 * M_PI * (2.0*T-t_mod) / T;
+			// }
+
 			Vector3d x_desired;
-			
-			
+			Vector3d dx_desired;
 
-			double T = 16; // seconds
-			double t_mod = fmod(time, 2.0*T);
-			double angle;
-			if (t_mod < T) {
-				angle = 2.0 * M_PI * t_mod / T;
-			} else {
-				angle = 2.0 * M_PI * (2.0*T-t_mod) / T;
+
+			if (controller_number == 1) {
+				kp = 50.0;
+				kv = 50.0;
+				x_desired = offset;
+			} else if (controller_number == 2) {
+				kp = 30.0;
+				kv = 30.0;
+				x_desired = offset + Vector3d(0.1*cos(time), 0.1*sin(time),0.0);
+				dx_desired = Vector3d(-0.1*sin(time), 0.1*cos(time), 0.0);
+			} else if (controller_number == 3) {
+				kp = 50.0;
+				kv = 50.0;
+				x_desired = offset;
+			} else if (controller_number == 4) {
+				kp = 50.0;
+				kv = 50.0;
+				x_desired = offset;
+		
 			}
-
-			x_desired = offset + Vector3d(0.1*cos(angle), 0.1*sin(angle),0.0);
-
-			x_desired = offset;
-
 			
-
-
 
 
 			Vector3d plate_position_desired;
 
-			plate_position_desired = Vector3d(0.4, 0.0 + 0.1*sin(2*time), 0.65+0.1*cos(2*time));
-			// plate_position_desired = Vector3d(0.4, 0.0, 0.65);
+			if (controller_number == 1){
+				plate_position_desired = Vector3d(0.4, 0.0, 0.65);
+			} else if (controller_number == 2) {
+				plate_position_desired = Vector3d(0.4, 0.0, 0.65);
+			} else if (controller_number == 3) {
+				plate_position_desired = Vector3d(0.4, 0.0, 0.65+0.05*cos(time));
+			} else if (controller_number == 4) {
+				plate_position_desired = Vector3d(0.4, 0.0+0.05*sin(time), 0.65+0.05*cos(time));
+			}
+
+			// plate_position_desired = Vector3d(0.4, 0.0 + 0.1*sin(2*time), 0.65+0.1*cos(2*time));
+			
 			pose_task->setGoalPosition(plate_position_desired);
 
 
@@ -253,8 +279,8 @@ int main(int argc, char** argv) {
 
 			
 			
-
-			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*ball_velocity) - F_g_prll;
+			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity)) - F_g_prll;
+			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity-dx_desired)) - F_g_prll;
 			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity) - ee_acceleration) - F_g_prll;
 
 			// F rotated in the frame of the plate
@@ -298,6 +324,18 @@ int main(int argc, char** argv) {
 			joint_task->updateTaskModel(pose_task->getTaskAndPreviousNullspace());
 
 			command_torques = pose_task->computeTorques() + joint_task->computeTorques();
+
+			if (Fz < Fz_thr) {
+				cout << "Balance to Idle" << endl;
+
+				pose_task->reInitializeTask();
+				joint_task->reInitializeTask();
+
+				pose_task->setGoalPosition(offset);
+
+
+				state = IDLE;
+			}
 		}
 
 		// execute redis write callback
