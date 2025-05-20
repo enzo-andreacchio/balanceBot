@@ -42,13 +42,41 @@ enum State {
 
 
 
-int main() {
+int main(int argc, char** argv) {
 	// Location of URDF files specifying world and robot information
 	static const string robot_file = string(CS225A_URDF_FOLDER) + "/panda/panda_arm_balance_bot.urdf";
 
+	// check for command line arguments
+    if (argc != 2) {
+        cout << "Incorrect number of command line arguments" << endl;
+        cout << "Expected usage: ./controller.cpp {NUMBER}" << endl;
+        return 1;
+    }
+
+	 // convert char to int, check for correct controller number input
+    string arg = argv[1];
+    int controller_number;
+    try {
+        size_t pos;
+        controller_number = stoi(arg, &pos);
+        if (pos < arg.size()) {
+            cerr << "Trailing characters after number: " << arg << '\n';
+            return 1;
+        }
+        else if (controller_number < 1 || controller_number > 3) {
+            cout << "Incorrect controller number" << endl;
+            return 1;
+        }
+    } catch (invalid_argument const &ex) {
+        cerr << "Invalid number: " << arg << '\n';
+        return 1;
+    } catch (out_of_range const &ex) {
+        cerr << "Number out of range: " << arg << '\n';
+        return 1;
+    }
+
 	// initial state 
 	int state = IDLE;
-	string controller_status = "1";
 	
 	// start redis client
 	auto redis_client = SaiCommon::RedisClient();
@@ -103,6 +131,7 @@ int main() {
 	previousTime = 0.0;
 
 	while (runloop) {
+
 		timer.waitForNextLoop();
 		const double time = timer.elapsedSimTime();
 
@@ -181,8 +210,8 @@ int main() {
 			Vector3d n;
 			n = zP;
 
-			// // Linear test
 			Vector3d x_desired;
+			
 			
 
 			double T = 16; // seconds
@@ -198,10 +227,13 @@ int main() {
 
 			x_desired = offset;
 
+			
+
 
 
 
 			Vector3d plate_position_desired;
+
 			plate_position_desired = Vector3d(0.4, 0.0 + 0.1*sin(2*time), 0.65+0.1*cos(2*time));
 			// plate_position_desired = Vector3d(0.4, 0.0, 0.65);
 			pose_task->setGoalPosition(plate_position_desired);
