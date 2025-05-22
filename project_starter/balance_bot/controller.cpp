@@ -86,19 +86,6 @@ int main(int argc, char** argv) {
 
 
 
-	if (sim) {
-		force_sensor_key = FORCE_SENSOR_KEY;
-		moment_sensor_key = MOMENT_SENSOR_KEY;
-	}
-	else {
-		force_torque_sensor_key = ACTUAL_FORCE_TORQUE_SENSOR_KEY;
-	}
-
-	if (sim){
-		// set the redis key for force to 0
-		redis_client.setEigen(force_sensor_key, Vector3d::Zero());
-	}
-	
 
 	// set up signal handler
 	signal(SIGABRT, &sighandler);
