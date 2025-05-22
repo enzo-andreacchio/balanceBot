@@ -30,6 +30,13 @@ const float Fz_thr = 0.1;
 const float plate_thickness = 0.01;
 const float saturation_angle = M_PI / 4;
 
+bool sim = true;
+
+std::string force_sensor_key;
+std::string moment_sensor_key;
+std::string force_torque_sensor_key;
+
+
 
 #include "redis_keys.h"
 #include "utils.h"
@@ -82,8 +89,21 @@ int main(int argc, char** argv) {
 	auto redis_client = SaiCommon::RedisClient();
 	redis_client.connect();
 
-	// set the redis key for force to 0
-	redis_client.setEigen(FORCE_SENSOR_KEY, Vector3d::Zero());
+
+
+	if (sim) {
+		force_sensor_key = FORCE_SENSOR_KEY;
+		moment_sensor_key = MOMENT_SENSOR_KEY;
+	}
+	else {
+		force_torque_sensor_key = ACTUAL_FORCE_TORQUE_SENSOR_KEY;
+	}
+
+	if (sim){
+		// set the redis key for force to 0
+		redis_client.setEigen(force_sensor_key, Vector3d::Zero());
+	}
+	
 
 	// set up signal handler
 	signal(SIGABRT, &sighandler);
@@ -142,7 +162,20 @@ int main(int argc, char** argv) {
 
 		Vector3d ball_position = redis_client.getEigen(BALL_POS_KEY);
 
-		Vector3d force = redis_client.getEigen(FORCE_SENSOR_KEY);
+		VectorXd force_torque_sensor;
+		if (!sim) {
+			force_torque_sensor = redis_client.getEigen(force_torque_sensor_key);
+		}
+
+
+		Vector3d force;
+		if (sim) {
+			force = redis_client.getEigen(force_sensor_key);
+		} else {
+			force << force_torque_sensor(0), force_torque_sensor(1), force_torque_sensor(2);
+		}
+
+		
 		float Fz = force(2);
 
 		Vector3d ee_pos = robot->position(control_link, control_point);
@@ -151,8 +184,13 @@ int main(int argc, char** argv) {
 		Vector3d plate_velocity = robot->velocity6d(control_link, control_point).head(3);
 
 		
+		Vector3d moment;
+		if (sim) {
+			moment = redis_client.getEigen(force_sensor_key);
+		} else {
+			moment << force_torque_sensor(3),force_torque_sensor(4),force_torque_sensor(5);
+		}
 
-		Vector3d moment = redis_client.getEigen(MOMENT_SENSOR_KEY);
 		Vector3d zP = ee_ori.col(2); // Z-axis of the frame of the plate
 
 	
