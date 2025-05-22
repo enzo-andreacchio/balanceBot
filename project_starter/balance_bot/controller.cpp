@@ -26,11 +26,11 @@ const double timeStep = 0.3;
 float kp = 50.0;
 float kv = 50;
 float k_theta = 0.05;
-const float Fz_thr = 0.1;
+const float Fz_thr = 0.3;
 const float plate_thickness = 0.01;
 const float saturation_angle = M_PI / 4;
 
-bool sim = true;
+bool sim = false;
 
 
 #include "redis_keys.h"
@@ -45,6 +45,19 @@ enum State {
 
 
 int main(int argc, char** argv) {
+
+	if (sim){
+		cout << "SIMULATION TRUE" << endl;
+		JOINT_ANGLES_KEY = "sai::sim::PANDA::sensors::q";
+		JOINT_VELOCITIES_KEY = "sai::sim::PANDA::sensors::dq";
+		JOINT_TORQUES_COMMANDED_KEY = "sai::sim::PANDA::actuators::fgc";
+	} else{
+		cout << "SIMULATION FALSE" << endl;
+		JOINT_TORQUES_COMMANDED_KEY = "sai::commands::FrankaRobot::control_torques";
+		JOINT_VELOCITIES_KEY = "sai::sensors::FrankaRobot::joint_velocities";
+		JOINT_ANGLES_KEY = "sai::sensors::FrankaRobot::joint_positions";
+		MASS_MATRIX_KEY = "sai::sensors::FrankaRobot::model::mass_matrix";
+	}
 	// Location of URDF files specifying world and robot information
 	static const string robot_file = string(CS225A_URDF_FOLDER) + "/panda/panda_arm_balance_bot.urdf";
 
@@ -96,7 +109,15 @@ int main(int argc, char** argv) {
 	auto robot = std::make_shared<SaiModel::SaiModel>(robot_file, false);
 	robot->setQ(redis_client.getEigen(JOINT_ANGLES_KEY));
 	robot->setDq(redis_client.getEigen(JOINT_VELOCITIES_KEY));
-	robot->updateModel();
+	MatrixXd M = robot->M();
+	if(!sim) {
+		M = redis_client.getEigen(MASS_MATRIX_KEY);
+		// bie addition
+		M(4,4) += 0.2;
+		M(5,5) += 0.2;
+		M(6,6) += 0.2;
+	}
+	robot->updateModel(M);
 
 	// prepare controller
 	int dof = robot->dof();
@@ -109,15 +130,15 @@ int main(int argc, char** argv) {
 	Affine3d compliant_frame = Affine3d::Identity();
 	compliant_frame.translation() = control_point;
 	auto pose_task = std::make_shared<SaiPrimitives::MotionForceTask>(robot, control_link, compliant_frame);
-	pose_task->setPosControlGains(400, 40, 0);
-	pose_task->setOriControlGains(400, 40, 0);
+	pose_task->setPosControlGains(100, 15, 0);
+	pose_task->setOriControlGains(100, 15, 0);
 
 	Vector3d ee_pos;
 	Matrix3d ee_ori;
 
 	// joint task
 	auto joint_task = std::make_shared<SaiPrimitives::JointTask>(robot);
-	joint_task->setGains(400, 40, 0);
+	joint_task->setGains(100, 15, 0);
 
 	VectorXd ee_pos_desired(3); 
 
@@ -135,6 +156,11 @@ int main(int argc, char** argv) {
 	Vector3d force = Vector3d::Zero();
 	Vector3d moment = Vector3d::Zero();
 
+	VectorXd force_moment;
+
+	VectorXd force_moments_total(6);
+	int count = 0;
+
 	while (runloop) {
 
 		if (sim) {
@@ -143,10 +169,15 @@ int main(int argc, char** argv) {
 			moment = redis_client.getEigen(MOMENT_SENSOR_KEY);
 		} else {
 			// read force and moment from redis
-			VectorXd force_moment = redis_client.getEigen(ACTUAL_FORCE_TORQUE_SENSOR_KEY);
+			force_moment = redis_client.getEigen(ACTUAL_FORCE_TORQUE_SENSOR_KEY);
 			force << force_moment(0), force_moment(1), force_moment(2);
 			moment << force_moment(3), force_moment(4), force_moment(5);
+
+			force -= Vector3d(2.02452, 1.69066, 13.127);
+			moment -= Vector3d(0.0941268, 0.145798, 0.0227043);
 		}
+
+
 
 		timer.waitForNextLoop();
 		const double time = timer.elapsedSimTime();
@@ -154,9 +185,19 @@ int main(int argc, char** argv) {
 		// update robot 
 		robot->setQ(redis_client.getEigen(JOINT_ANGLES_KEY));
 		robot->setDq(redis_client.getEigen(JOINT_VELOCITIES_KEY));
-		robot->updateModel();
+		M = robot->M();
+		if(!sim) {
+			M = redis_client.getEigen(MASS_MATRIX_KEY);
+			// bie addition
+			M(4,4) += 0.2;
+			M(5,5) += 0.2;
+			M(6,6) += 0.2;
+		}
+		robot->updateModel(M);
 
 		Vector3d ball_position = redis_client.getEigen(BALL_POS_KEY);
+
+		
 
 		float Fz = force(2);
 
@@ -197,7 +238,29 @@ int main(int argc, char** argv) {
 		VectorXd inputForces(3);
 
 	
+		
+		// CALIBRATION
+
+
+		// if (count < 5000) {
+		// 	force_moments_total += force_moment;
+		// 	count++;
+		// } 
+		// if (count == 5000) {
+		// 	force_moments_total /= count;
+		// 	cout << force_moments_total << endl;
+		// 	count++;
+		// }
+
+
+		// cout << "Fz " << Fz << endl;
+		if (Fz > Fz_thr && time > 1) {
+			cout << "in balance state" << endl;
+		}
+
+
 		if (state == IDLE) {
+			// cout << "IDLE STATE" << endl;
 			// update task model
 			N_prec.setIdentity();
 			pose_task->updateTaskModel(N_prec);
@@ -207,8 +270,7 @@ int main(int argc, char** argv) {
 
 			command_torques = pose_task->computeTorques();
 
-
-			if (Fz > Fz_thr && controller_number > 0) {
+			if (Fz > Fz_thr && controller_number > 0 && time > 1) {
 				cout << "Idle to Balance" << endl;
 
 				pose_task->reInitializeTask();
@@ -218,6 +280,8 @@ int main(int argc, char** argv) {
 
 				state = BALANCE;
 			}
+
+
 
 		} else if (state == BALANCE) {
 
@@ -241,7 +305,7 @@ int main(int argc, char** argv) {
 
 
 			if (controller_number == 1) {
-				kp = 50.0;
+				kp = 20.0;
 				kv = 50.0;
 				x_desired = offset;
 			} else if (controller_number == 2) {
@@ -339,17 +403,17 @@ int main(int argc, char** argv) {
 
 			command_torques = pose_task->computeTorques() + joint_task->computeTorques();
 
-			if (Fz < Fz_thr) {
-				cout << "Balance to Idle" << endl;
+			// if (Fz < Fz_thr) {
+			// 	cout << "Balance to Idle" << endl;
 
-				pose_task->reInitializeTask();
-				joint_task->reInitializeTask();
+			// 	pose_task->reInitializeTask();
+			// 	joint_task->reInitializeTask();
 
-				pose_task->setGoalPosition(offset);
+			// 	pose_task->setGoalPosition(offset);
 
 
-				state = IDLE;
-			}
+			// 	state = IDLE;
+			// }
 		}
 
 		// execute redis write callback
