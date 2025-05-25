@@ -1,3 +1,5 @@
+watch -n0.1 redis-cli get sai2::ATIGamma_Sensor::Romeo::force_torque
+
 # cs225a
 This repository will contain the homeworks and demos for the class cs225a.
 

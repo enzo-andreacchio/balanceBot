@@ -20,15 +20,15 @@ using namespace SaiPrimitives;
 bool runloop = false;
 void sighandler(int){runloop = false;}
 
-const double m = 0.17;
+const double m = 0.170;
 const double g = 9.81;
 const double timeStep = 0.3;
 float kp = 50.0;
 float kv = 50;
-float k_theta = 0.05;
-const float Fz_thr = 0.3;
-const float plate_thickness = 0.01;
-const float saturation_angle = M_PI / 4;
+float k_theta = 0.1;
+const float Fz_thr = 0.4;
+const float plate_thickness = 0.012;
+const float saturation_angle = M_PI / 12;
 
 bool sim = false;
 
@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
             cerr << "Trailing characters after number: " << arg << '\n';
             return 1;
         }
-        else if (controller_number < 0 || controller_number > 4) {
+        else if (controller_number < 0 || controller_number > 101) {
             cout << "Incorrect controller number" << endl;
             return 1;
         }
@@ -109,15 +109,15 @@ int main(int argc, char** argv) {
 	auto robot = std::make_shared<SaiModel::SaiModel>(robot_file, false);
 	robot->setQ(redis_client.getEigen(JOINT_ANGLES_KEY));
 	robot->setDq(redis_client.getEigen(JOINT_VELOCITIES_KEY));
-	MatrixXd M = robot->M();
+	MatrixXd Mass = robot->M();
 	if(!sim) {
-		M = redis_client.getEigen(MASS_MATRIX_KEY);
+		Mass= redis_client.getEigen(MASS_MATRIX_KEY);
 		// bie addition
-		M(4,4) += 0.2;
-		M(5,5) += 0.2;
-		M(6,6) += 0.2;
+		Mass(4,4) += 0.2;
+		Mass(5,5) += 0.2;
+		Mass(6,6) += 0.2;
 	}
-	robot->updateModel(M);
+	robot->updateModel(Mass);
 
 	// prepare controller
 	int dof = robot->dof();
@@ -126,12 +126,13 @@ int main(int argc, char** argv) {
 
 	// arm task
 	const string control_link = "link7";
-	const Vector3d control_point = Vector3d(0, 0, 0.17+plate_thickness);
+	const Vector3d control_point = Vector3d(0, 0, 0.047+plate_thickness);
 	Affine3d compliant_frame = Affine3d::Identity();
 	compliant_frame.translation() = control_point;
 	auto pose_task = std::make_shared<SaiPrimitives::MotionForceTask>(robot, control_link, compliant_frame);
 	pose_task->setPosControlGains(100, 15, 0);
 	pose_task->setOriControlGains(100, 15, 0);
+	//pose_task->disableInternalOtg();
 
 	Vector3d ee_pos;
 	Matrix3d ee_ori;
@@ -153,28 +154,76 @@ int main(int argc, char** argv) {
 	double previousTime;
 	previousTime = 0.0;
 
+	Affine3d sensor_tranformation_in_link;
+	Vector3d sensor_position_in_link;
+
 	Vector3d force = Vector3d::Zero();
 	Vector3d moment = Vector3d::Zero();
 
-	VectorXd force_moment;
+	VectorXd init_force_moment = VectorXd::Zero(6);
+	bool first_loop = true;
 
-	VectorXd force_moments_total(6);
 	int count = 0;
 
 	while (runloop) {
+		count += 1;
 
 		if (sim) {
 			// read force and moment from redis
 			force = redis_client.getEigen(FORCE_SENSOR_KEY);
 			moment = redis_client.getEigen(MOMENT_SENSOR_KEY);
 		} else {
-			// read force and moment from redis
-			force_moment = redis_client.getEigen(ACTUAL_FORCE_TORQUE_SENSOR_KEY);
-			force << force_moment(0), force_moment(1), force_moment(2);
-			moment << force_moment(3), force_moment(4), force_moment(5);
+			Matrix3d R_link_sensor = Matrix3d::Identity();
+			sensor_position_in_link = Vector3d(0,0,0.047);
+			sensor_tranformation_in_link.translation() = sensor_position_in_link;
+			sensor_tranformation_in_link.linear() = R_link_sensor;
 
-			force -= Vector3d(2.02452, 1.69066, 13.127);
-			moment -= Vector3d(0.0941268, 0.145798, 0.0227043);
+			VectorXd sensed_force_moment_local_frame = VectorXd::Zero(6);
+			VectorXd sensed_force_moment_world_frame = VectorXd::Zero(6);
+
+			VectorXd force_bias = VectorXd::Zero(6);
+			double tool_mass = 0;
+			Vector3d tool_com = Vector3d::Zero();
+
+
+			// Properties
+			force_bias << 0, 0, 0, 0, 0, 0;
+			tool_mass = 1.169;
+			tool_com = Vector3d(0,0,0.00746);
+
+			// read force and moment from redis
+			sensed_force_moment_local_frame = redis_client.getEigen(ACTUAL_FORCE_TORQUE_SENSOR_KEY);
+
+			
+
+			// Add bias and ee weight to sensed forces
+			sensed_force_moment_local_frame -= force_bias;
+
+
+			Matrix3d R_world_sensor;
+			Matrix3d R_world_link;
+			R_world_link = robot->rotationInWorld("link7", Matrix3d::Identity());
+			R_world_sensor = R_world_link * R_link_sensor;
+			Vector3d p_tool_local_frame = tool_mass * R_world_sensor.transpose() * Vector3d(0,0,-9.81);
+
+			sensed_force_moment_local_frame.head(3) += p_tool_local_frame;
+			
+
+			sensed_force_moment_local_frame.tail(3) += tool_com.cross(p_tool_local_frame);
+
+			if (first_loop) {
+				init_force_moment = sensed_force_moment_local_frame;
+				first_loop = false;
+			}
+
+			sensed_force_moment_local_frame -= init_force_moment;
+
+
+			force = R_world_sensor * sensed_force_moment_local_frame.head(3);
+			moment = R_world_sensor * sensed_force_moment_local_frame.tail(3);
+
+			// cout << moment.transpose() << endl;
+
 		}
 
 
@@ -185,15 +234,21 @@ int main(int argc, char** argv) {
 		// update robot 
 		robot->setQ(redis_client.getEigen(JOINT_ANGLES_KEY));
 		robot->setDq(redis_client.getEigen(JOINT_VELOCITIES_KEY));
-		M = robot->M();
+		Mass = robot->M();
+		Vector3d M;
 		if(!sim) {
-			M = redis_client.getEigen(MASS_MATRIX_KEY);
+			Mass = redis_client.getEigen(MASS_MATRIX_KEY);
 			// bie addition
-			M(4,4) += 0.2;
-			M(5,5) += 0.2;
-			M(6,6) += 0.2;
+			Mass(4,4) += 0.2;
+			Mass(5,5) += 0.2;
+			Mass(6,6) += 0.2;
+
+			M = -moment; // Moment vector
 		}
-		robot->updateModel(M);
+		else {
+			M = -moment; // Moment vector
+		}
+		robot->updateModel(Mass);
 
 		Vector3d ball_position = redis_client.getEigen(BALL_POS_KEY);
 
@@ -201,23 +256,31 @@ int main(int argc, char** argv) {
 
 		float Fz = force(2);
 
+		// cout << force.transpose() << endl;
+		// cout << local_force.transpose() << endl;
+
 		Vector3d ee_pos = robot->position(control_link, control_point);
 		Matrix3d ee_ori = robot->rotation(control_link);
 		Vector3d ee_acceleration = robot->acceleration6d(control_link, control_point).head(3);
 		Vector3d plate_velocity = robot->velocity6d(control_link, control_point).head(3);
 
-		
+		// cout << ee_ori.transpose() << endl;
 
 		Vector3d zP = ee_ori.col(2); // Z-axis of the frame of the plate
 
-	
+		// cout << zP.transpose() << endl;
 
 		// Compute the position vector from the moment vector
-		Vector3d M = -moment; // Moment vector
+		
 		Vector3d x = momentsToPositions(zP, M, m, g);
-		Vector3d offset(0.4, 0.0, 0.65-0.01514);
+		Vector3d offset(0.4, 0.0, 0.55);
 
 		Vector3d ball_position_predicted = x + offset;
+
+		redis_client.setEigen(INFERRED_BALL_POSITION, x);
+
+		// cout << x.transpose() << endl;
+
 
 
 		// Compute the ball velocity using a time step
@@ -238,25 +301,12 @@ int main(int argc, char** argv) {
 		VectorXd inputForces(3);
 
 	
-		
-		// CALIBRATION
-
-
-		// if (count < 5000) {
-		// 	force_moments_total += force_moment;
-		// 	count++;
-		// } 
-		// if (count == 5000) {
-		// 	force_moments_total /= count;
-		// 	cout << force_moments_total << endl;
-		// 	count++;
-		// }
 
 
 		// cout << "Fz " << Fz << endl;
-		if (Fz > Fz_thr && time > 1) {
-			cout << "in balance state" << endl;
-		}
+		// if (Fz > Fz_thr && time > 1) {
+		// 	cout << "in balance state" << endl;
+		// }
 
 
 		if (state == IDLE) {
@@ -266,7 +316,32 @@ int main(int argc, char** argv) {
 			pose_task->updateTaskModel(N_prec);
 
 			pose_task->setGoalPosition(offset);
-			pose_task->setGoalOrientation(Matrix3d::Identity());
+
+
+
+
+			// pose_task->setGoalOrientation(Matrix3d::Identity());
+
+			Matrix3d rotation;
+			rotation = AngleAxisd(0*M_PI/180, Vector3d(1,0,0)).toRotationMatrix();
+
+
+			// if (time > 4) {
+			// 	rotation = AngleAxisd(5*M_PI/180, Vector3d(1,0,0)).toRotationMatrix();
+			// }
+			// else if (time > 3) {
+			// 	rotation = AngleAxisd(10*M_PI/180, Vector3d(1,0,0)).toRotationMatrix();
+			// }
+			// else if (time > 2) {
+			// 	rotation = AngleAxisd(15*M_PI/180, Vector3d(1,0,0)).toRotationMatrix();
+			// }
+			// else if (time > 1) {
+			// 	rotation = AngleAxisd(20*M_PI/180, Vector3d(1,0,0)).toRotationMatrix();
+			// }
+
+
+
+			pose_task->setGoalOrientation(rotation);
 
 			command_torques = pose_task->computeTorques();
 
@@ -305,8 +380,8 @@ int main(int argc, char** argv) {
 
 
 			if (controller_number == 1) {
-				kp = 20.0;
-				kv = 50.0;
+				kp = 12.0;
+				kv = 5.0;
 				x_desired = offset;
 			} else if (controller_number == 2) {
 				kp = 30.0;
@@ -324,18 +399,18 @@ int main(int argc, char** argv) {
 		
 			}
 			
-
+			redis_client.setEigen(BALL_GOAL_POSITION, x_desired-offset);
 
 			Vector3d plate_position_desired;
 
 			if (controller_number == 1){
-				plate_position_desired = Vector3d(0.4, 0.0, 0.65);
+				plate_position_desired = offset;
 			} else if (controller_number == 2) {
-				plate_position_desired = Vector3d(0.4, 0.0, 0.65);
+				plate_position_desired = offset;
 			} else if (controller_number == 3) {
-				plate_position_desired = Vector3d(0.4, 0.0, 0.65+0.05*cos(time));
+				plate_position_desired = offset+Vector3d(0, 0, 0.05*cos(time));
 			} else if (controller_number == 4) {
-				plate_position_desired = Vector3d(0.4, 0.0+0.05*sin(time), 0.65+0.05*cos(time));
+				plate_position_desired = offset+Vector3d(0, 0.05*sin(time), 0.05*cos(time));
 			}
 
 			// plate_position_desired = Vector3d(0.4, 0.0 + 0.1*sin(2*time), 0.65+0.1*cos(2*time));
@@ -355,23 +430,43 @@ int main(int argc, char** argv) {
 			MatrixXd Kp = kp * MatrixXd::Identity(3, 3);
 			MatrixXd Kv = kv * MatrixXd::Identity(3, 3);
 
-			
-			
-			inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity)) - F_g_prll;
+			// cout << ball_velocity.transpose() << endl;
+			inputForces = -m*Kp*(ball_position_predicted - x_desired)- F_g_prll;
+			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity));
+			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity)) - F_g_prll;
 			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity-dx_desired)) - F_g_prll;
 			// inputForces = m*(-Kp*(ball_position_predicted - x_desired) - Kv*(ball_velocity) - ee_acceleration) - F_g_prll;
 
+			
+
 			// F rotated in the frame of the plate
-			Vector3d F_rotated = ee_ori.transpose() * inputForces;	
+			Vector3d F_rotated = ee_ori.transpose() * inputForces;
+
+			
+
+			
+
+			
 
 			float Fdx = F_rotated(0);
 			float Fdy = F_rotated(1);
+
+			Vector2d F_plate = Vector2d(Fdx, Fdy);
+
+			redis_client.setEigen(DESIRED_BALL_FORCE, F_plate);
+
+			cout << redis_client.getEigen(DESIRED_BALL_FORCE).transpose() << endl;
 
 			float thr_zero_force = 1e-7;
 
 			Vector3d n_Pi;
 
-			n_Pi = Vector3d(-Fdy, Fdx, 0)/sqrt(Fdx*Fdx + Fdy*Fdy);;
+			n_Pi = Vector3d(-Fdy, Fdx, 0)/sqrt(Fdx*Fdx + Fdy*Fdy);
+
+
+			Vector2d n_Pi_plate = Vector2d(n_Pi(0), n_Pi(1));
+			redis_client.setEigen(N_PI, n_Pi_plate);
+
 
 			float force_magnitude = sqrt(Fdx * Fdx + Fdy * Fdy);
 
@@ -390,10 +485,19 @@ int main(int argc, char** argv) {
 				theta_npi = -saturation_angle;
 			} 
 
-			Eigen::AngleAxisd rotation(theta_npi, n_Pi);
+			// cout << theta_npi*180/M_PI << endl;
+			
+
+
+			Eigen::AngleAxisd rotation(theta_npi, ee_ori * n_Pi);
+
+			// cout << (ee_ori * n_Pi).transpose() << endl;
 			Eigen::Matrix3d R = rotation.toRotationMatrix();
 
-			pose_task->setGoalOrientation(R);
+			if (count%100 == 0) {
+				pose_task->setGoalOrientation(R);
+			}
+			
 
 			// update task model
 			N_prec.setIdentity();
@@ -403,16 +507,16 @@ int main(int argc, char** argv) {
 
 			command_torques = pose_task->computeTorques() + joint_task->computeTorques();
 
-			// if (Fz < Fz_thr) {
-			// 	cout << "Balance to Idle" << endl;
+			//  if (Fz < Fz_thr) {
+			//  	cout << "Balance to Idle" << endl;
 
-			// 	pose_task->reInitializeTask();
+			//  	pose_task->reInitializeTask();
 			// 	joint_task->reInitializeTask();
 
 			// 	pose_task->setGoalPosition(offset);
 
 
-			// 	state = IDLE;
+			//  	state = IDLE;
 			// }
 		}
 

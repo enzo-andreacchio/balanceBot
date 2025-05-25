@@ -13,5 +13,9 @@ const std::string BALL_VEL_KEY = "sai::sim::ball::velocity";
 const std::string FORCE_SENSOR_KEY = "sai::sim::panda::sensors::F";
 const std::string MOMENT_SENSOR_KEY = "sai::sim::panda::sensors::M";
 const std::string ACTUAL_FORCE_TORQUE_SENSOR_KEY = "sai2::ATIGamma_Sensor::Romeo::force_torque";
+const std::string INFERRED_BALL_POSITION = "sai::real::inferred_ball_position";
+const std::string DESIRED_BALL_FORCE = "sai::real::desired_ball_force";
+const std::string BALL_GOAL_POSITION = "sai::real::ball_goal_position";
+const std::string N_PI = "sai::real::n_pi";
 
 std::string MASS_MATRIX_KEY;
