@@ -5,6 +5,68 @@
 using namespace std;
 using namespace Eigen;
 
+//Let us implement the methods for the cartesian buffer:
+
+CartesianBuffer::CartesianBuffer(int bufferSize) {
+
+	if (bufferSize <= 0) {
+		throw std::runtime_error("cannot have a non positive buffer size!");
+	}
+
+	_bufferSize = bufferSize;
+	_bufferSum = Vector3d(0,0,0);
+}
+
+int CartesianBuffer::getSize() const {
+	return _buffer.size();
+}
+
+Vector3d CartesianBuffer::getMovingAverage() const {
+	if (_buffer.size() == 0) {
+		return Vector3d(0,0,0);
+	}
+	return _bufferSum/_buffer.size();
+}
+
+void CartesianBuffer::addToBuffer(float time, Vector3d val) {
+	_buffer.push_back(val); 
+	_timesBuffer.push_back(time);
+	_bufferSum += val;
+
+	if (_buffer.size() > _bufferSize) {
+		_bufferSum -= _buffer.front();
+		_buffer.pop_front();
+		_timesBuffer.pop_front();
+	}
+}
+
+Vector3d CartesianBuffer::getCurrentValue() const {
+	if (_buffer.size() == 0) {
+		return Vector3d(0,0,0);
+	}
+
+	return _buffer.back();
+}
+
+Vector3d CartesianBuffer::getDelta() const {
+	if (_buffer.size() < 2) {
+		return Vector3d(0,0,0);
+	}
+
+	return (_buffer.front() - _buffer[_buffer.size() - 2])/(_timesBuffer.front() - _timesBuffer[_timesBuffer.size() -2]);
+}
+
+void tearOffToolForcesAndMoments(Matrix3d & R_world_sensor, VectorXd & sensed_force_moment_local_frame, const Vector3d & tool_com, const float tool_mass) {
+    //Now, we are finding the gravity vector caused by our tool in the sensor frame, in the world frame it is mg
+    Vector3d p_tool_local_frame = tool_mass * R_world_sensor.transpose() * Vector3d(0,0,-9.81);
+
+    //Let us compensate for the gravity force that the sensor feels because of the tool, to make it 0
+    sensed_force_moment_local_frame.head(3) += p_tool_local_frame;
+
+    //Let us compensate for the moments that the tool exerts on the force sensor:
+    sensed_force_moment_local_frame.tail(3) += tool_com.cross(p_tool_local_frame);
+}
+
 
 // Cross-product matrix operator
 Matrix3d crossProductOperator(Vector3d& v) {
