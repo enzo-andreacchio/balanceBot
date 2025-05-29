@@ -9,9 +9,11 @@ import numpy as np
 r = redis.Redis()
 
 key_ball_position = "sai::real::inferred_ball_position"
+key_ball_velocity = "sai::real::inferred_ball_velocity"
 key_force_direction = "sai::real::desired_ball_force"
 key_goal_position = "sai::real::ball_goal_position"
 key_n_pi = "sai::real::n_pi"
+
 
 history_pos = []
 memory = 20
@@ -39,14 +41,18 @@ ax.add_patch(reference_circle)
 # Initialize scatter and arrow
 scat = ax.scatter([], [], s=100)
 force_arrow = None
+velocity_arrow = None
 rotation_axis = None
 scatGoal = ax.scatter([], [], s=50)
+velocity_text = ax.text(0, 0, "", color='yellow', fontsize=12, weight='bold')
+
 
 while True:
     data_position = r.get(key_ball_position)
     data_force = r.get(key_force_direction)
     data_goal_position = r.get(key_goal_position)
     data_rotation_axis = r.get(key_n_pi)
+    data_velocity = r.get(key_ball_velocity)
 
     if data_position:
         pos = json.loads(data_position)
@@ -121,6 +127,45 @@ while True:
         force_arrow = ax.arrow(start_x, start_y, dx_scaled, dy_scaled,
                             head_width=0.01, head_length=0.01,
                             fc='white', ec='white', alpha=1.0)
+        
+
+        if data_velocity and data_position:
+            velocity_dir = json.loads(data_velocity)
+
+            # Remove previous arrow
+            if velocity_arrow:
+                velocity_arrow.remove()
+
+            # Draw new arrow
+            start_x, start_y = pos[0], pos[1]
+            dx, dy = velocity_dir[0], velocity_dir[1]
+
+
+            magnitude = np.linalg.norm([dx, dy])
+
+            print("{:.3f}".format(magnitude))
+
+
+            arrow_length = 0.1
+        
+            dx_scaled = dx*arrow_length/magnitude
+            dy_scaled = dy*arrow_length/magnitude
+
+            transparency = 0.0
+            if magnitude > 0.1:
+                transparency = 1.0
+            
+            velocity_arrow = ax.arrow(start_x, start_y, dx_scaled, dy_scaled,
+                                    head_width=0.01, head_length=0.01,
+                                    fc='yellow', ec='yellow', alpha=transparency)
+
+            velocity_text.set_text(f"{magnitude:.3f}")
+            # position it slightly offset from the ball
+            velocity_text.set_position((start_x + 0.02, start_y + 0.02))
+            velocity_text.set_alpha(transparency)
+
+
+            
 
 
     plt.pause(0.05)

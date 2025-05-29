@@ -20,12 +20,14 @@ using namespace SaiPrimitives;
 bool runloop = false;
 void sighandler(int){runloop = false;}
 
-const double m = 0.170;
+const double m = 0.056; // tennis ball
+// const double m = 0.170; // pool ball
 const double g = 9.81;
 const double timeStep = 0.3;
 float kp = 50.0;
 float kv = 50;
 float k_theta = 0.1;
+float foresight;
 const float Fz_thr = 0.4;
 const float plate_thickness = 0.012;
 const float saturation_angle = M_PI / 12;
@@ -140,9 +142,9 @@ int main(int argc, char** argv) {
 	if(!sim) {
 		Mass= redis_client.getEigen(MASS_MATRIX_KEY);
 		// bie addition
-		Mass(4,4) += 0.2;
-		Mass(5,5) += 0.2;
-		Mass(6,6) += 0.2;
+		Mass(4,4) += 0.3;
+		Mass(5,5) += 0.3;
+		Mass(6,6) += 0.3;
 	}
 	robot->updateModel(Mass);
 
@@ -157,12 +159,12 @@ int main(int argc, char** argv) {
 	Affine3d compliant_frame = Affine3d::Identity();
 	compliant_frame.translation() = control_point;
 	auto pose_task = std::make_shared<SaiPrimitives::MotionForceTask>(robot, control_link, compliant_frame);
-	pose_task->setPosControlGains(100, 15, 0);
+	pose_task->setPosControlGains(100, 30, 0);
 	pose_task->setOriControlGains(100, 15, 0);
 	//we need to disable internal otg, because tilting will be unstable if we have waypoints in between orientations
 	pose_task->disableInternalOtg();
 	//let us set the velocity saturation for the pose task
-	pose_task->enableVelocitySaturation(0.2, 0.1);
+	pose_task->enableVelocitySaturation(0.2, 90* M_PI/180);
 
 	// joint task
 	auto joint_task = std::make_shared<SaiPrimitives::JointTask>(robot);
@@ -178,14 +180,19 @@ int main(int argc, char** argv) {
 
 	//This is our counter that is useful for keeping track of the iteration of the simloop
 	int count = 0;
+	//This is the counter that starts as soon as the ball is sensed
+	int balanceCount = 0;
 	//counter -----------------------
 
 	CartesianBuffer positionBuffer = CartesianBuffer(POS_BUFFER_SIZE);
 	CartesianBuffer velocityBuffer = CartesianBuffer(VEL_BUFFER_SIZE);
 
+	//----------------------------------------GAINS---------------------------------------------------------
+
 	if (controller == 1) {
-		kp = 12.0;
-		kv = 5.0;
+		kp = 80.0;
+		kv = 10.0;
+		foresight = 0.01;
 	} else if (controller == 2) {
 		kp = 30.0;
 		kv = 30.0;
@@ -240,9 +247,9 @@ int main(int argc, char** argv) {
 		if(!sim) {
 			Mass = redis_client.getEigen(MASS_MATRIX_KEY);
 			// bie addition
-			Mass(4,4) += 0.2;
-			Mass(5,5) += 0.2;
-			Mass(6,6) += 0.2;
+			Mass(4,4) += 0.3;
+			Mass(5,5) += 0.3;
+			Mass(6,6) += 0.3;
 
 		}
 		robot->updateModel(Mass);
@@ -257,10 +264,16 @@ int main(int argc, char** argv) {
 		
 		Vector3d sensed_ball_position = momentsToPositions(zP, moment, m, g);
 		
-		redis_client.setEigen(INFERRED_BALL_POSITION, sensed_ball_position);
-
 		positionBuffer.addToBuffer(time, sensed_ball_position);
 		velocityBuffer.addToBuffer(time, positionBuffer.getDelta());
+
+		redis_client.setEigen(INFERRED_BALL_POSITION, positionBuffer.getMovingAverage());
+		redis_client.setEigen(INFERRED_BALL_VELOCITY, velocityBuffer.getMovingAverage());
+
+		// if (count % 1000 == 0) {
+		// 	velocityBuffer.visualize();
+		// }
+		
 		//------------------------------------------------------------------------------
 
 		if (state == IDLE) {
@@ -300,7 +313,35 @@ int main(int argc, char** argv) {
 			VectorXd inputForces(3);
 			Vector3d ball_position = positionBuffer.getMovingAverage();
 			Vector3d ball_velocity = velocityBuffer.getMovingAverage();
-			inputForces = -m*Kp*(ball_position) - m*Kv*(ball_velocity);
+
+
+			float vnorm = ball_velocity.norm();
+
+			if (vnorm < 0.1 || balanceCount < 500) {
+				inputForces = -m*Kp*(ball_position);
+			} else {
+				Vector3d target_position = ball_position;
+
+				if (vnorm > 0.1 && balanceCount > 500) {
+					Vector3d ball_velocity_normalized = ball_velocity / vnorm;
+					target_position = ball_position + ball_velocity_normalized*foresight;
+				}
+
+				inputForces = -m*Kp*(target_position) - m*Kv*(ball_velocity);
+			}
+
+			
+
+
+			
+
+
+			
+			
+
+			
+
+			
 			// F rotated in the frame of the plate
 			Vector3d F_rotated = ee_ori.transpose() * inputForces;
 
@@ -309,7 +350,6 @@ int main(int argc, char** argv) {
 
 			Vector2d F_plate = Vector2d(Fdx, Fdy);
 			redis_client.setEigen(DESIRED_BALL_FORCE, F_plate);
-			cout << redis_client.getEigen(DESIRED_BALL_FORCE).transpose() << endl;
 			float thr_zero_force = 1e-7;
 			Vector3d n_Pi;
 
@@ -325,8 +365,10 @@ int main(int argc, char** argv) {
 			
 			if (theta_npi > saturation_angle){
 				theta_npi = saturation_angle;
+				cout << "Angle saturation" << endl;
 			} else if (theta_npi < -saturation_angle) {
 				theta_npi = -saturation_angle;
+				cout << "Angle saturation" << endl;
 			} 
 
 			Eigen::AngleAxisd rotation(theta_npi, ee_ori * n_Pi);
@@ -342,6 +384,8 @@ int main(int argc, char** argv) {
 			
 			joint_task->updateTaskModel(pose_task->getTaskAndPreviousNullspace());
 			command_torques = pose_task->computeTorques() + joint_task->computeTorques();
+
+			balanceCount++;
 		}
 
 		// execute redis write callback
@@ -358,12 +402,4 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
-// if (controller_number == 1){
-// 	plate_position_desired = offset;
-// } else if (controller_number == 2) {
-// 	plate_position_desired = offset;
-// } else if (controller_number == 3) {
-// 	plate_position_desired = offset+Vector3d(0, 0, 0.05*cos(time));
-// } else if (controller_number == 4) {
-// 	plate_position_desired = offset+Vector3d(0, 0.05*sin(time), 0.05*cos(time));
-// }
+

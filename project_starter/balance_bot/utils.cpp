@@ -1,6 +1,7 @@
 #include "utils.h"
 #include <stdio.h>
 #include <math.h>
+#include <iostream>
 
 using namespace std;
 using namespace Eigen;
@@ -25,10 +26,12 @@ Vector3d CartesianBuffer::getMovingAverage() const {
 	if (_buffer.size() == 0) {
 		return Vector3d(0,0,0);
 	}
+
 	return _bufferSum/_buffer.size();
 }
 
 void CartesianBuffer::addToBuffer(float time, Vector3d val) {
+
 	_buffer.push_back(val); 
 	_timesBuffer.push_back(time);
 	_bufferSum += val;
@@ -49,11 +52,29 @@ Vector3d CartesianBuffer::getCurrentValue() const {
 }
 
 Vector3d CartesianBuffer::getDelta() const {
-	if (_buffer.size() < 2) {
+	if (_buffer.size() < 100) {
 		return Vector3d(0,0,0);
 	}
 
 	return (_buffer.front() - _buffer[_buffer.size() - 2])/(_timesBuffer.front() - _timesBuffer[_timesBuffer.size() -2]);
+}
+
+void CartesianBuffer::visualize() const {
+	cout << "Start Visualize -------" << endl;
+
+	for (int i = 0; i < _buffer.size(); i++) {
+		cout << _buffer[i].transpose() << endl;
+	}
+
+	cout << "-------------------" << endl;
+
+	for (int i = 0; i < _buffer.size(); i++) {
+		cout << _timesBuffer[i] << " ";
+	}
+
+	cout << "End Visualize -----------" << endl;
+
+	cout << _bufferSum << endl;
 }
 
 void tearOffToolForcesAndMoments(Matrix3d & R_world_sensor, VectorXd & sensed_force_moment_local_frame, const Vector3d & tool_com, const float tool_mass) {
