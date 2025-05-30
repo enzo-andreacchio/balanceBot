@@ -51,13 +51,41 @@ Vector3d CartesianBuffer::getCurrentValue() const {
 	return _buffer.back();
 }
 
+
 Vector3d CartesianBuffer::getDelta() const {
-	if (_buffer.size() < 100) {
+	if (_buffer.size() < 20) {
 		return Vector3d(0,0,0);
 	}
 
 	return (_buffer.front() - _buffer[_buffer.size() - 2])/(_timesBuffer.front() - _timesBuffer[_timesBuffer.size() -2]);
 }
+
+
+Vector3d CartesianBuffer::getInst() const {
+	if (_buffer.size() < 20) {
+		return Vector3d(0,0,0);
+	}
+
+	return (_buffer.back() - _buffer[_buffer.size() - 2])/(_timesBuffer.back() - _timesBuffer[_timesBuffer.size() -2]);
+}
+
+Vector3d CartesianBuffer::getStandardDeviation() const {
+	if (_buffer.empty()) {
+		return Vector3d(0, 0, 0);
+	}
+
+	Vector3d mean = getMovingAverage();
+	Vector3d variance_sum(0, 0, 0);
+
+	for (const auto& val : _buffer) {
+		Vector3d diff = val - mean;
+		variance_sum += diff.cwiseProduct(diff);  // element-wise square
+	}
+
+	Vector3d variance = variance_sum / _buffer.size();
+	return variance.cwiseSqrt();  // standard deviation = sqrt(variance)
+}
+
 
 void CartesianBuffer::visualize() const {
 	cout << "Start Visualize -------" << endl;

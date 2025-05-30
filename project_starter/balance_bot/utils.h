@@ -19,6 +19,8 @@ public:
     void addToBuffer(float time, Vector3d val);
     Vector3d getCurrentValue() const;
     Vector3d getDelta() const;
+    Vector3d getInst() const;
+    Vector3d getStandardDeviation() const;
     void visualize() const;
 
 private:

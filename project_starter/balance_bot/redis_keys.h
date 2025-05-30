@@ -18,5 +18,6 @@ const std::string INFERRED_BALL_VELOCITY = "sai::real::inferred_ball_velocity";
 const std::string DESIRED_BALL_FORCE = "sai::real::desired_ball_force";
 const std::string BALL_GOAL_POSITION = "sai::real::ball_goal_position";
 const std::string N_PI = "sai::real::n_pi";
+const std::string GAINS = "sai::real::gains";
 
 std::string MASS_MATRIX_KEY;

@@ -11,6 +11,7 @@
 
 #include <iostream>
 #include <string>
+#include <cmath>
 
 using namespace std;
 using namespace Eigen;
@@ -20,21 +21,26 @@ using namespace SaiPrimitives;
 bool runloop = false;
 void sighandler(int){runloop = false;}
 
-const double m = 0.056; // tennis ball
-// const double m = 0.170; // pool ball
+
+// const double m = 0.056; // tennis ball
+const double m = 0.170; // pool ball
 const double g = 9.81;
 const double timeStep = 0.3;
 float kp = 50.0;
 float kv = 50;
 float k_theta = 0.1;
 float foresight;
-const float Fz_thr = 0.4;
+
+const float Fz_thr = 0.25;
+float full_norm;
 const float plate_thickness = 0.012;
 const float saturation_angle = M_PI / 12;
-const int POS_BUFFER_SIZE = 100;
-const int VEL_BUFFER_SIZE = 100;
+const int POS_BUFFER_SIZE = 300;
+const int VEL_BUFFER_SIZE = 300;
 const Vector3d SENSOR_POS_IN_LINK = Vector3d(0,0,0.047);
 const Vector3d offset = Vector3d(0.4, 0.0, 0.55);
+
+const float NOISE_CUTTOFF = 1.0f;
 
 const int TILT_PERIOD = 100;//this is the period of time to pass before the robot tilts
 
@@ -191,7 +197,7 @@ int main(int argc, char** argv) {
 
 	if (controller == 1) {
 		kp = 80.0;
-		kv = 10.0;
+		kv = 60.0;
 		foresight = 0.01;
 	} else if (controller == 2) {
 		kp = 30.0;
@@ -203,6 +209,13 @@ int main(int argc, char** argv) {
 		kp = 50.0;
 		kv = 50.0;
 	}
+
+	VectorXd gains(2);
+
+	gains << kp, kv;
+	redis_client.setEigen(GAINS, gains);
+
+	
 
 	//----------------------------------------INIT---------------------------------------------------------
 
@@ -265,19 +278,21 @@ int main(int argc, char** argv) {
 		Vector3d sensed_ball_position = momentsToPositions(zP, moment, m, g);
 		
 		positionBuffer.addToBuffer(time, sensed_ball_position);
-		velocityBuffer.addToBuffer(time, positionBuffer.getDelta());
+
+		Vector3d inst_vel = positionBuffer.getDelta();
+
+		velocityBuffer.addToBuffer(time, inst_vel);
 
 		redis_client.setEigen(INFERRED_BALL_POSITION, positionBuffer.getMovingAverage());
 		redis_client.setEigen(INFERRED_BALL_VELOCITY, velocityBuffer.getMovingAverage());
 
-		// if (count % 1000 == 0) {
-		// 	velocityBuffer.visualize();
-		// }
+		full_norm = force.norm() + moment.norm();
+		
 		
 		//------------------------------------------------------------------------------
 
 		if (state == IDLE) {
-			cout << "Currently in state: IDLE" << std::endl;
+			//cout << "Currently in state: IDLE" << std::endl;
 			// update task model
 			N_prec.setIdentity();
 			pose_task->updateTaskModel(N_prec);
@@ -290,7 +305,7 @@ int main(int argc, char** argv) {
 
 			command_torques = pose_task->computeTorques();
 
-			if (Fz > Fz_thr && controller > 0 && time > 1) {
+			if (full_norm > Fz_thr && controller > 0 && time > 1) {
 				cout << "Idle to Balance" << endl;
 				pose_task->reInitializeTask();
 				joint_task->reInitializeTask();
@@ -307,8 +322,10 @@ int main(int argc, char** argv) {
 			redis_client.setEigen(BALL_GOAL_POSITION, x_desired-offset);
 			pose_task->setGoalPosition(offset);
 
-			MatrixXd Kp = kp * MatrixXd::Identity(3, 3);
-			MatrixXd Kv = kv * MatrixXd::Identity(3, 3);
+			gains = redis_client.getEigen(GAINS);
+
+			MatrixXd Kp = gains(0) * MatrixXd::Identity(3, 3);
+			MatrixXd Kv = gains(1) * MatrixXd::Identity(3, 3);
 
 			VectorXd inputForces(3);
 			Vector3d ball_position = positionBuffer.getMovingAverage();
@@ -316,19 +333,23 @@ int main(int argc, char** argv) {
 
 
 			float vnorm = ball_velocity.norm();
+			float std_vel = velocityBuffer.getStandardDeviation().norm();
 
 			if (vnorm < 0.1 || balanceCount < 500) {
 				inputForces = -m*Kp*(ball_position);
 			} else {
 				Vector3d target_position = ball_position;
 
-				if (vnorm > 0.1 && balanceCount > 500) {
+				if (vnorm > 0.05 && balanceCount > 500) {
 					Vector3d ball_velocity_normalized = ball_velocity / vnorm;
 					target_position = ball_position + ball_velocity_normalized*foresight;
 				}
 
-				inputForces = -m*Kp*(target_position) - m*Kv*(ball_velocity);
-			}
+			 	inputForces = -m * Kp * (target_position-Vector3d(0.12, -0.03, 0)) - m * Kv * ball_velocity * (1-min(1.0f, std_vel/NOISE_CUTTOFF));
+
+			 }
+
+			//inputForces = -m*Kp*(ball_position) - m*Kv*(ball_velocity);
 
 			
 
@@ -365,10 +386,10 @@ int main(int argc, char** argv) {
 			
 			if (theta_npi > saturation_angle){
 				theta_npi = saturation_angle;
-				cout << "Angle saturation" << endl;
+				//cout << "Angle saturation" << endl;
 			} else if (theta_npi < -saturation_angle) {
 				theta_npi = -saturation_angle;
-				cout << "Angle saturation" << endl;
+				//cout << "Angle saturation" << endl;
 			} 
 
 			Eigen::AngleAxisd rotation(theta_npi, ee_ori * n_Pi);
@@ -386,6 +407,10 @@ int main(int argc, char** argv) {
 			command_torques = pose_task->computeTorques() + joint_task->computeTorques();
 
 			balanceCount++;
+			// if (full_norm < Fz_thr && controller > 0 && time > 1) {
+			// 	state = IDLE;
+			// 	cout << "Balance to IDLE" << endl;
+			// }
 		}
 
 		// execute redis write callback
