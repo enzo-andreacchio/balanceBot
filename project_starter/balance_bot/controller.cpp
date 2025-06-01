@@ -24,6 +24,7 @@ void sighandler(int){runloop = false;}
 
 // const double m = 0.056; // tennis ball
 const double m = 0.170; // pool ball
+// const double m = 0.024; // squash ball
 const double g = 9.81;
 const double timeStep = 0.3;
 float kp = 50.0;
@@ -39,6 +40,8 @@ const int POS_BUFFER_SIZE = 300;
 const int VEL_BUFFER_SIZE = 300;
 const Vector3d SENSOR_POS_IN_LINK = Vector3d(0,0,0.047);
 const Vector3d offset = Vector3d(0.4, 0.0, 0.55);
+// const Vector3d bias_position = Vector3d(0.02+0.046-0.041 + 0.07, 0.05-0.035+0.038-0.06, 0);
+const Vector3d bias_position = Vector3d(0.082, -0.012, 0);
 
 const float NOISE_CUTTOFF = 1.0f;
 
@@ -196,12 +199,14 @@ int main(int argc, char** argv) {
 	//----------------------------------------GAINS---------------------------------------------------------
 
 	if (controller == 1) {
-		kp = 80.0;
-		kv = 60.0;
+
+		kp = 10.0;
+		kv = 28.0;
 		foresight = 0.01;
 	} else if (controller == 2) {
-		kp = 30.0;
-		kv = 30.0;
+		kp = 10.0;
+		kv = 28.0;
+		foresight = 0.01;
 	} else if (controller == 3) {
 		kp = 50.0;
 		kv = 50.0;
@@ -252,6 +257,7 @@ int main(int argc, char** argv) {
 			//THis is just a caveat change, the moments we require are flipped
 			moment *= -1;
 		}
+
 
 		// update robot ------------------------------------
 		robot->setQ(redis_client.getEigen(JOINT_ANGLES_KEY));
@@ -319,7 +325,9 @@ int main(int argc, char** argv) {
 			n = zP;
 
 			Vector3d x_desired = offset;
-			redis_client.setEigen(BALL_GOAL_POSITION, x_desired-offset);
+		
+
+			redis_client.setEigen(BALL_GOAL_POSITION, x_desired -offset);
 			pose_task->setGoalPosition(offset);
 
 			gains = redis_client.getEigen(GAINS);
@@ -333,25 +341,37 @@ int main(int argc, char** argv) {
 
 
 			float vnorm = ball_velocity.norm();
+			float pnorm = (ball_position - bias_position).norm();
 			float std_vel = velocityBuffer.getStandardDeviation().norm();
 
-			if (vnorm < 0.1 || balanceCount < 500) {
-				inputForces = -m*Kp*(ball_position);
+			Vector3d target_position;
+			// Vector3d ball_velocity_normalized = ball_velocity / vnorm;
+			// target_position = ball_position + ball_velocity_normalized*foresight;
+			// Vector3d desired_velocity = (kp/kv)*(bias_position - target_position);
+			// float nu = 0;
+			// float Vmax = 0.05;
+			// if (Vmax <= abs(desired_velocity.norm())) {
+			// 	nu = Vmax/desired_velocity.norm();
+			// } else {
+			// 	nu = sgn(Vmax/desired_velocity.norm());
+			// }
+
+
+			if (vnorm < 0.05 && pnorm < 0.05) {
+				inputForces = -m*Kp*(ball_position-bias_position) - m*Kv*ball_velocity;
 			} else {
-				Vector3d target_position = ball_position;
+				target_position = ball_position;
 
 				if (vnorm > 0.05 && balanceCount > 500) {
 					Vector3d ball_velocity_normalized = ball_velocity / vnorm;
 					target_position = ball_position + ball_velocity_normalized*foresight;
 				}
 
-			 	inputForces = -m * Kp * (target_position-Vector3d(0.12, -0.03, 0)) - m * Kv * ball_velocity * (1-min(1.0f, std_vel/NOISE_CUTTOFF));
-
+			 	inputForces = -m * Kp * (target_position-bias_position) - m * Kv * ball_velocity * (1-min(1.0f, std_vel/NOISE_CUTTOFF));
 			 }
 
-			//inputForces = -m*Kp*(ball_position) - m*Kv*(ball_velocity);
+			//  inputForces = -m * Kv * (ball_velocity - nu*desired_velocity);
 
-			
 
 
 			

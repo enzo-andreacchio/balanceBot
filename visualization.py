@@ -48,8 +48,8 @@ if data_gains:
     kp_i = json.loads(data_gains)[0]
     kv_i = json.loads(data_gains)[1]
 
-slider_kp = Slider(ax_kp, '', 0, 200, valinit=kp_i, valstep=1)
-slider_kv = Slider(ax_kv, '', 0, 200, valinit=kv_i, valstep=1)
+slider_kp = Slider(ax_kp, '', 0, 300, valinit=kp_i, valstep=1)
+slider_kv = Slider(ax_kv, '', 0, 300, valinit=kv_i, valstep=1)
 
 # Add static labels
 fig.text(0.18, 0.1, 'Kp:', color='white', fontsize=10, ha='right', va='center')
