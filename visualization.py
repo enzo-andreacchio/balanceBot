@@ -52,8 +52,8 @@ slider_kp = Slider(ax_kp, '', 0, 300, valinit=kp_i, valstep=1)
 slider_kv = Slider(ax_kv, '', 0, 300, valinit=kv_i, valstep=1)
 
 # Add static labels
-fig.text(0.18, 0.1, 'Kp:', color='white', fontsize=10, ha='right', va='center')
-fig.text(0.18, 0.05, 'Kv:', color='white', fontsize=10, ha='right', va='center')
+# fig.text(0.18, 0.1, 'Kp:', color='white', fontsize=10, ha='right', va='center')
+# fig.text(0.18, 0.05, 'Kv:', color='white', fontsize=10, ha='right', va='center')
 
 # Add dynamic value text
 kp_text = fig.text(0.87, 0.1, f"{slider_kp.val:.0f}", color='white', fontsize=10, ha='left', va='center')
@@ -65,15 +65,15 @@ def update_kp(kp_val):
     kv_val = slider_kv.val
     gains_list = [kp_val, kv_val]
     r.set(key_gains, json.dumps(gains_list))
-    kp_text.set_text(f"{kp_val:.0f}")
-    kv_text.set_text(f"{kv_val:.0f}")
+    # kp_text.set_text(f"{kp_val:.0f}")
+    # kv_text.set_text(f"{kv_val:.0f}")
 
 def update_kv(kv_val):
     kp_val = slider_kp.val
     gains_list = [kp_val, kv_val]
     r.set(key_gains, json.dumps(gains_list))
-    kp_text.set_text(f"{kp_val:.0f}")
-    kv_text.set_text(f"{kv_val:.0f}")
+    # kp_text.set_text(f"{kp_val:.0f}")
+    # kv_text.set_text(f"{kv_val:.0f}")
 
 slider_kp.on_changed(update_kp)
 slider_kv.on_changed(update_kv)
@@ -89,6 +89,8 @@ velocity_arrow = None
 rotation_axis = None
 
 while True:
+    
+
     data_position = r.get(key_ball_position)
     data_force = r.get(key_force_direction)
     data_goal_position = r.get(key_goal_position)
@@ -168,5 +170,10 @@ while True:
             velocity_text.set_text(f"{magnitude:.3f}")
             velocity_text.set_position((start_x + 0.02, start_y + 0.02))
             velocity_text.set_alpha(transparency)
+
+    slider_kp.ax.set_visible(False)
+    slider_kv.ax.set_visible(False)
+    kp_text.set_visible(False)
+    kv_text.set_visible(False)
 
     plt.pause(0.05)

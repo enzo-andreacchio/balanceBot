@@ -1,31 +1,49 @@
-watch -n0.1 redis-cli get sai2::ATIGamma_Sensor::Romeo::force_torque
+STEP 1
 
-# cs225a
-This repository will contain the homeworks and demos for the class cs225a.
+go to https://172.16.0.10/desk/
+click tab SETTINGS/END EFFECTOR/
+click the pen next to Mechanical Data 
+click UPLOAD
+select src2/OpenSai/balanceBot/endeffector-config-balancebot.json
+go back to DESK
+click on the N/A tab
+click Activate FCI (if not already activated)
+unlock the joints
 
-## Dependencies
-The project depends on the OpenSai libraries. You have received instructions to install OpenSai in class.
 
-## Build and make
-In the main directory, create a build directory and build from that folder:
-```
-mkdir build
-cd build
-cmake .. && make -j4
-```
-## Run
-Go to the bin folder and then to the folder of the application you want to run.
-For hw0 for example:
-```
-cd bin/hw0
-./hw0
-```
 
-### hw0
-You have 2 programs there. A visualizer and the actual homework file.
-The visualizer is here to help you make sure you are doing what you think you are doing.
-To run it, go to bin/hw0 and run ./hw0-viz. You will see a window appear with the robot from hw0 in a configuration close to the one drawn on the pdf.
-When you run hw0 and modify the values for the joints, it will modify the position of the visualized robot as long as you publish the new joint values to redis from hw0
-```
-redis_client.setEigen(JOINT_ANGLES_KEY, robot->q());
-```
+STEP 2
+
+open the terminal
+run the robot driver with:
+cd ~/OpenSai/drivers/FrankaPanda/redis_driver
+and then run sh launch_driver.sh
+open a second window and run the Force/Torque sensor driver with:
+cd ~/OpenSai/drivers/ATIGamma_redis_driver/build
+and then run ./ATIGamma_redis_driver 192.168.1.1
+
+
+
+STEP 3
+
+open a third window in the terminal and run the controller + visualizer with:
+cd ~/OpenSai/balanceBot
+and run: 
+sh scripts/launch.sh 
+
+if there is a redis error, open a new terminal window and run redis-server
+
+
+
+STEP 4
+
+Have fun
+
+
+
+STEP 5
+
+To stop the controller,
+close the python tab and CTRL+C the controller window
+Then to turn off the rest:
+CTRL+C the robot driver and sensor driver
